@@ -32,6 +32,8 @@ import java.util.concurrent.TimeUnit
 
 /** Talks to the Apps Script web app pasted into the user's spreadsheet (see apps-script/Codigo.gs). */
 object Sheets {
+    /** Version the deployed web app reported on the last read. */
+    var scriptVersion = ""
     private fun open(url: String): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 20_000; readTimeout = 30_000
     }
@@ -54,6 +56,7 @@ object Sheets {
     fun read(cfg: Config): Pair<List<List<String>>, List<List<String>>> {
         val url = cfg.sheetUrl.trim() + "?key=" + URLEncoder.encode(cfg.sheetKey, "UTF-8")
         val o = parse(readBody(open(url)))
+        scriptVersion = o["versao"]?.jsonPrimitive?.content ?: "antiga (sem número)"
         fun tab(name: String) = (o[name] as? JsonArray).orEmpty().map { row -> row.jsonArray.map { it.jsonPrimitive.content } }
         return tab("Respostas") to tab("Consulta")
     }

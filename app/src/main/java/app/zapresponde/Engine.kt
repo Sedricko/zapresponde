@@ -260,6 +260,12 @@ object Engine {
     fun frete(text: String, rows: List<List<String>>, notFound: String): String? =
         freteRoute(text)?.let { freteMessage(it, rows) ?: notFound.ifBlank { null } }
 
+    /** Diagnostic: sends the sheet's first route (column A) through the FreteBras matcher. Null = no route in the sheet. */
+    fun freteSelfTest(rows: List<List<String>>): Pair<String, Boolean>? {
+        val a = rows.map { it.firstOrNull().orEmpty().trim() }.firstOrNull { Regex("(?i)^[^/]+/\\w\\w para [^/]+/\\w\\w").containsMatchIn(it) } ?: return null
+        return a to (frete("estou disponível para carregar seu frete de $a de TESTE", rows, "") != null)
+    }
+
     /** Ready message of the sheet row for this route, or null when the route is not in the sheet. */
     fun freteMessage(r: Route, rows: List<List<String>>): String? {
         val hits = rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }

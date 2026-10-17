@@ -1,9 +1,9 @@
-// ZapResponde - script da planilha, versão 0.9
+// ZapResponde - script da planilha, versão 0.9.2
 // ZapResponde: cole este código em Extensões > Apps Script da sua planilha e salve.
 // Depois: Implantar > Nova implantação > App da Web (executar como "Eu", acesso "Qualquer pessoa").
 // Por fim, recarregue a planilha e use o menu ZapResponde > Conectar celular. Não precisa editar nada aqui.
 
-const VERSAO = '0.9'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
+const VERSAO = '0.9.2'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
 
 function chave() {
   const props = PropertiesService.getScriptProperties();
@@ -96,7 +96,7 @@ function doGet(e) {
     const b = ss.getSheetByName('Backup');
     return saida({ Backup: b && b.getLastRow() > 1 ? b.getRange(2, 2).getValue() : '' });
   }
-  const r = {};
+  const r = { versao: VERSAO };
   const abas = { Respostas: ss.getSheetByName('Respostas'), Consulta: consulta(ss) };
   Object.keys(abas).forEach(function (nome) {
     const aba = abas[nome];

@@ -163,7 +163,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Diagnóstico",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -651,7 +651,7 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Refresh, "Backup", "Exportar e importar configurações e regras", null) { open("backup") }
         Divider()
-        FeatureRow(Icons.Default.Info, "Não está funcionando?", "Verifique permissões e bateria", null) { open("help") }
+        FeatureRow(Icons.Default.Info, "Diagnóstico", "Testa tudo e mostra por que não respondeu", null) { open("help") }
     }
     val ctx = LocalContext.current
     Hint("ZapResponde versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
@@ -960,6 +960,20 @@ fun HelpScreen() {
         Divider()
         Check("Respostas automáticas ligadas", Store.config.enabled) { cfg { copy(enabled = true) } }
     }
+    val scope = rememberCoroutineScope()
+    var report by remember { mutableStateOf("") }
+    Panel("Relatório") {
+        Button({
+            report = "Testando..."
+            scope.launch { report = withContext(Dispatchers.IO) { diagnose(ctx) } }
+        }, Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Rodar diagnóstico completo") }
+        if (report.isNotEmpty()) {
+            Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            OutlinedButton({
+                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, report), "Enviar relatório"))
+            }, Modifier.fillMaxWidth()) { Text("Compartilhar relatório") }
+        }
+    }
     Panel("Ações") {
         FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp", "Precisam estar ligadas para o app responder", null) {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
@@ -978,6 +992,58 @@ fun HelpScreen() {
                 "• Se nada resolver, desligue e ligue o acesso às notificações ou reinicie o celular.",
         )
     }
+}
+
+/** Plain-text report: every setting that can stop a reply, the sheet and freight self-tests, and the last messages seen. */
+private fun diagnose(ctx: android.content.Context): String {
+    val c = Store.config
+    val now = System.currentTimeMillis()
+    val l = mutableListOf("RELATÓRIO ZAPRESPONDE · ${fmt(now)}", "App versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName, "")
+    fun ok(b: Boolean, yes: String, no: String) { l += if (b) "✅ $yes" else "❌ $no" }
+    fun warn(b: Boolean, text: String) { if (b) l += "⚠️ $text" }
+
+    l += "— Celular"
+    ok(NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName), "Acesso às notificações liberado", "Acesso às notificações DESLIGADO: o app não vê nenhuma mensagem")
+    ok(ReplyService.instance != null, "Serviço de respostas rodando", "Serviço de respostas parado: use \"Reiniciar o serviço de respostas\" ou reinicie o celular")
+    ok(ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName), "Sem economia de bateria", "Economia de bateria ativa: o Android pode parar o app")
+    ok(NotificationManagerCompat.from(ctx).areNotificationsEnabled(), "Notificações do ZapResponde liberadas", "Notificações do ZapResponde bloqueadas: alertas e aprovação não aparecem")
+    val last = Store.events.firstOrNull()
+    if (last == null) l += "⚠️ Nenhuma mensagem do WhatsApp chegou ao app ainda"
+    else warn(now - last.time > 6 * 3_600_000L, "Última mensagem vista há mais de 6 h (${fmt(last.time)}). Com o WhatsApp Web aberto, o celular não mostra notificações e o app não vê as mensagens.")
+
+    l += ""; l += "— Configurações"
+    ok(c.enabled, "Respostas automáticas ligadas", "Respostas automáticas DESLIGADAS (botão da tela Início)")
+    warn(c.scheduleOn && !Engine.inWindow(c.scheduleHours, c.scheduleDays, LocalDateTime.now()), "Agenda ligada e agora está fora do horário (${c.scheduleHours})")
+    warn(c.contactsOn && c.contactsMode != Audience.ALL, "Filtro de contatos ligado: ${AUDIENCE[c.contactsMode]}")
+    warn(c.contactsOn && !c.groupsOn, "Respostas em grupos desligadas")
+    warn(c.approvalOn, "Modo aprovação ligado: nada sai sem você tocar em Enviar")
+    val paused = Store.state.chats.filter { it.value.pauseUntil > now }
+    warn(paused.isNotEmpty(), "Conversas pausadas: " + paused.entries.joinToString { "${it.key} (até ${fmt(it.value.pauseUntil)})" })
+    l += "ℹ️ Regras ativas: ${Store.allRules().count { it.enabled }} (app ${Store.rules.count { it.enabled }}, planilha ${Store.sheet.rules.count { it.enabled }})"
+
+    l += ""; l += "— Planilha"
+    if (!c.sheetOn || c.sheetUrl.isBlank()) l += "⚠️ Planilha não conectada"
+    else runCatching { Sheets.refresh(c) }.fold(
+        {
+            l += "✅ Planilha conectada · script ${Sheets.scriptVersion}"
+            l += "ℹ️ ${Store.sheet.rules.size} respostas na aba Respostas · ${maxOf(0, Store.sheet.consulta.size - 1)} linhas de consulta/cargas"
+        },
+        { l += "❌ Planilha não respondeu: ${it.message}" },
+    )
+    val box = Store.outbox
+    warn(box.historico.size + box.pedidos.size + box.leads.size > 0, "Aguardando envio para a planilha: ${box.historico.size} histórico, ${box.pedidos.size} pedidos, ${box.leads.size} leads")
+
+    l += ""; l += "— Fretes FreteBras"
+    if (!c.freteOn) l += "⚠️ Fretes FreteBras DESLIGADO: anúncios do FreteBras não são respondidos"
+    else when (val t = Engine.freteSelfTest(Store.sheet.consulta)) {
+        null -> l += "❌ Nenhuma rota \"Origem/UF para Destino/UF\" na coluna A da planilha de cargas"
+        else -> ok(t.second, "Teste com a rota \"${t.first}\": carga encontrada", "Teste com a rota \"${t.first}\": carga NÃO encontrada")
+    }
+
+    l += ""; l += "— Últimas mensagens recebidas"
+    if (Store.events.isEmpty()) l += "(nenhuma)"
+    Store.events.take(15).forEach { e -> l += "${fmt(e.time)} · ${e.chat}: \"${e.text.take(50).replace('\n', ' ')}\" → ${e.result}" }
+    return l.joinToString("\n")
 }
 
 @Composable

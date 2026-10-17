@@ -15,6 +15,10 @@ data class HistoryEntry(
     val text: String, val reply: String, val rule: String,
 )
 
+/** One WhatsApp message the service saw, and what it decided: the "Registro" of the diagnostic. */
+@Serializable
+data class LogEntry(val time: Long, val chat: String, val text: String, val result: String)
+
 @Serializable
 data class SheetCache(
     val rules: List<Rule> = emptyList(),
@@ -48,6 +52,8 @@ object Store {
         private set
     var history by mutableStateOf(listOf<HistoryEntry>())
         private set
+    var events = listOf<LogEntry>()
+        private set
     var state = State()
         private set
     var outbox = Outbox()
@@ -61,6 +67,7 @@ object Store {
         rules = load("rules.json") ?: defaultRules()
         sheet = load("sheet.json") ?: SheetCache()
         history = load("history.json") ?: emptyList()
+        events = load("events.json") ?: emptyList()
         state = load("state.json") ?: State()
         outbox = load("outbox.json") ?: Outbox()
     }
@@ -104,6 +111,12 @@ object Store {
     fun saveState() = save("state.json", state)
 
     fun allRules() = rules + if (config.sheetOn && config.sheetRulesOn) sheet.rules else emptyList()
+
+    @Synchronized
+    fun log(chat: String, text: String, result: String) {
+        events = (listOf(LogEntry(System.currentTimeMillis(), chat, text, result)) + events).take(200)
+        save("events.json", events)
+    }
 
     @Synchronized
     fun addHistory(e: HistoryEntry) {

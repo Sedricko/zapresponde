@@ -42,8 +42,13 @@ class ReplyService : NotificationListenerService() {
         if (sbn.packageName !in APPS) return
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-        val action = replyAction(n) ?: return
+        val action = replyAction(n)
         val msg = parse(sbn) ?: return
+        if (action == null) {
+            // Usually a call, a status or a chat WhatsApp won't let us answer from the notification.
+            Store.log(msg.chat, msg.text, "Sem botão Responder na notificação")
+            return
+        }
 
         // WhatsApp re-posts the same notification with the whole history; handle each message once.
         val key = "${msg.chat}|${msg.text}|${lastMessageTime(n)}"
@@ -56,6 +61,7 @@ class ReplyService : NotificationListenerService() {
         if (msg.fromMe && cfg.takeoverOn && msg.text !in cs?.lastTexts.orEmpty() && now - (cs?.lastBotReply ?: 0) > 15_000) {
             pending.remove(msg.chat)?.cancel()
             Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)
+            Store.log(msg.chat, msg.text, "Mensagem sua: conversa pausada por ${cfg.takeoverMin} min")
         }
         // The freight sheet changes all the time; read it fresh so a new load is not answered as "indisponível".
         if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && Engine.freteRoute(msg.text) != null) {
@@ -77,7 +83,7 @@ class ReplyService : NotificationListenerService() {
             ).also { Store.saveState() }
         }
         Log.d(TAG, "${msg.chat}: ${d.reason}")
-        if (d.replies.isEmpty()) return
+        if (d.replies.isEmpty()) { Store.log(msg.chat, msg.text, d.reason); return }
         val open = sbn.notification.contentIntent
         if (cfg.alertOn) d.alert?.let { Alerts.show(this, "Carga pedida", it, open) }
 
@@ -85,9 +91,11 @@ class ReplyService : NotificationListenerService() {
         if (cfg.approvalOn && (list.isEmpty() || Engine.normalize(msg.chat) in list)) {
             val id = nextId++
             approvals[id] = Approval(msg, action, sbn.packageName, d)
+            Store.log(msg.chat, msg.text, "Aguardando sua aprovação (${d.rule})")
             Alerts.approval(this, id, msg.chat, d.replies.joinToString("\n---\n"), open)
             return
         }
+        Store.log(msg.chat, msg.text, "Respondido (${d.rule})")
         deliver(msg, action, sbn.packageName, d)
     }
 
@@ -106,7 +114,7 @@ class ReplyService : NotificationListenerService() {
             delay(d.delayMs)
             d.replies.forEachIndexed { i, text ->
                 if (i > 0) delay(1500)
-                if (!send(action, text)) return@launch
+                if (!send(action, text)) { Store.log(msg.chat, msg.text, "Falhou ao enviar pelo WhatsApp"); return@launch }
             }
             pending.remove(msg.chat)
             val entry = HistoryEntry(
