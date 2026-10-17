@@ -39,6 +39,7 @@ object Sheets {
     private fun readBody(c: HttpURLConnection): String {
         val code = c.responseCode
         val body = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
+        if (code == 404) error("link não encontrado (404). Na planilha, use ZapResponde > Conectar celular e leia o QR de novo.")
         if (code >= 400) error("HTTP $code")
         return body
     }

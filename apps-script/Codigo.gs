@@ -24,7 +24,7 @@ function conectar() {
   criarAbas();
   const url = ScriptApp.getService().getUrl() || '';
   const t = HtmlService.createTemplate(HTML);
-  t.qrUrl = url.endsWith('/exec') ? url : '';
+  t.qrUrl = url;
   t.qrKey = chave();
   let ui;
   try {
@@ -34,7 +34,20 @@ function conectar() {
     console.log('Link: ' + (url || '(implante primeiro)') + '\nChave: ' + chave());
     throw new Error('Abra a planilha em outra aba, recarregue e use o menu ZapResponde > Conectar celular. (O link e a chave também estão no registro acima, para digitar no app.)');
   }
-  ui.showModalDialog(t.evaluate().setWidth(380).setHeight(560), 'Conectar o ZapResponde');
+  ui.showModalDialog(t.evaluate().setWidth(400).setHeight(660), 'Conectar o ZapResponde');
+}
+
+// Called by the dialog: checks the link answers like the app will see it. Empty string = OK.
+function testarLink(url) {
+  if (!/^https:\/\/script\.google\.com\/.*\/exec$/.test(url)) return 'O link precisa começar com https://script.google.com/ e terminar em /exec.';
+  const r = UrlFetchApp.fetch(url + '?key=' + encodeURIComponent(chave()), { muteHttpExceptions: true, followRedirects: true });
+  const code = r.getResponseCode();
+  const body = r.getContentText();
+  if (code === 200 && body.indexOf('"Respostas"') >= 0) return '';
+  if (code === 404) return 'Esse link não existe (erro 404). Copie o link certo em Implantar > Gerenciar implantações > App da Web.';
+  if (body.indexOf('chave incorreta') >= 0) return 'Essa implantação está com o código antigo. Em Implantar > Gerenciar implantações, clique no lápis, escolha Nova versão e Implantar.';
+  if (code === 200) return 'O link pediu login. Na implantação, o acesso precisa ser "Qualquer pessoa".';
+  return 'O link respondeu com erro ' + code + '.';
 }
 
 function novaChave() {
@@ -108,24 +121,31 @@ const HTML = `<!DOCTYPE html><html><head><base target="_top">
   .passo{background:#f1f7f4;border-radius:10px;padding:10px;margin:8px 0;font-size:13px}
   .erro{background:#fde7e7}
 </style></head><body>
-<div id="semUrl" class="passo erro" style="display:none">
-  <b>Falta implantar.</b> No Apps Script, clique em <b>Implantar &gt; Nova implantação</b>, escolha <b>App da Web</b>,
-  executar como <b>Eu</b>, acesso <b>Qualquer pessoa</b>. Depois cole aqui o link que termina em /exec:
-  <input id="url" placeholder="https://script.google.com/macros/s/.../exec" oninput="gerar()">
+<div class="passo">Link do app da Web (confira com Implantar &gt; Gerenciar implantações):
+  <input id="url" placeholder="https://script.google.com/macros/s/.../exec" onchange="gerar()">
 </div>
+<div id="msg" class="passo" style="display:none"></div>
 <h3>Escaneie com o app</h3>
 <div class="passo">No celular: ZapResponde &gt; Planilha &gt; <b>Ler QR code</b>.</div>
 <div id="qr"></div>
 <div class="passo">A chave fica guardada no script. Para trocar, use o menu ZapResponde &gt; Gerar nova chave.</div>
 <script>
   const chave = <?!= JSON.stringify(qrKey) ?>;
-  const url = <?!= JSON.stringify(qrUrl) ?>;
-  if (!url) document.getElementById('semUrl').style.display = 'block';
+  document.getElementById('url').value = <?!= JSON.stringify(qrUrl) ?>;
+  function aviso(t, erro) {
+    const m = document.getElementById('msg');
+    m.style.display = t ? 'block' : 'none'; m.className = erro ? 'passo erro' : 'passo'; m.textContent = t;
+  }
   function gerar() {
-    const u = url || document.getElementById('url').value.trim();
+    const u = document.getElementById('url').value.trim();
     const box = document.getElementById('qr'); box.innerHTML = '';
-    if (!u.endsWith('/exec')) return;
-    new QRCode(box, { text: JSON.stringify({ zapresponde: 1, url: u, key: chave }), width: 260, height: 260 });
+    if (!u) { aviso('Falta implantar: Implantar > Nova implantação > App da Web, executar como Eu, acesso Qualquer pessoa. Depois cole o link acima.', true); return; }
+    aviso('Testando o link...', false);
+    google.script.run.withSuccessHandler(function (erro) {
+      if (erro) { aviso(erro, true); return; }
+      aviso('Link funcionando. Pode escanear.', false);
+      new QRCode(box, { text: JSON.stringify({ zapresponde: 1, url: u, key: chave }), width: 240, height: 240 });
+    }).withFailureHandler(function (e) { aviso('Não consegui testar: ' + e.message, true); }).testarLink(u);
   }
   gerar();
 </script></body></html>`;
