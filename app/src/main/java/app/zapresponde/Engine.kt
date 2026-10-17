@@ -90,9 +90,11 @@ object Engine {
             }
         }
 
+        val why = mutableListOf<String>()
         for (r in rules) {
-            if (!r.enabled || !allowed(r, msg) || !inWindow(r.hours, r.days, now)) continue
-            if (!matches(r, msg.text)) continue
+            if (!r.enabled || !matches(r, msg.text)) continue
+            if (!allowed(r, msg)) { why += "${r.name}: contato ou grupo não permitido"; continue }
+            if (!inWindow(r.hours, r.days, now)) { why += "${r.name}: fora do horário da regra"; continue }
             val st = cs.rules.getOrPut(r.id) { longArrayOf(0, 0) }
             val ok = when (r.freq) {
                 Freq.ALWAYS -> true
@@ -100,18 +102,20 @@ object Engine {
                 Freq.INTERVAL -> st[0] == 0L || nowMs - st[1] >= r.intervalMin * 60_000L
                 Freq.MAX -> st[0] < r.maxReplies
             }
-            if (!ok) continue
+            if (!ok) { why += "${r.name}: limite de frequência (${r.freq.label})"; continue }
             val replies = when (r.kind) {
                 Kind.TEXT -> pick(r, random)
                 Kind.LOOKUP -> listOfNotNull(lookup(r, msg.text, consulta))
             }.filter { it.isNotBlank() }
-            if (replies.isEmpty()) continue
+            if (replies.isEmpty()) { why += "${r.name}: consulta sem resultado"; continue }
             st[0]++; st[1] = nowMs
             out += replies
             ruleName = if (ruleName.isEmpty()) r.name else "$ruleName + ${r.name}"
             break
         }
-        if (out.isEmpty()) return skip("Nenhuma regra serviu")
+        if (out.isEmpty()) return skip(
+            if (why.isEmpty()) "Nenhuma regra serviu" else "Nenhuma regra respondeu · " + why.joinToString("; "),
+        )
         return finish(msg, now, cfg, cs, nowMs, out, ruleName, formRow, random)
     }
 
