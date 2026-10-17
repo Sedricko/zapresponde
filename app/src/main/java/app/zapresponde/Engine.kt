@@ -23,14 +23,12 @@ object Engine {
         consulta: List<List<String>>,
         state: State,
         random: Random = Random.Default,
+        phoneNames: Set<String> = emptySet(),
     ): Decision {
         if (!cfg.enabled) return skip("Respostas automáticas desligadas")
         // Answering this would send the bot's reply to the contact because *you* wrote; ReplyService treats it as takeover.
         if (msg.fromMe) return skip("Mensagem enviada por você na conversa")
-        if (cfg.ignoreOn) {
-            val names = splitList(cfg.ignoreList).map { normalize(it) }
-            if (normalize(msg.chat) in names || normalize(msg.sender) in names) return skip("Contato na lista de ignorados")
-        }
+        if (cfg.contactsOn) audience(msg, cfg, phoneNames)?.let { return skip(it) }
         if (cfg.scheduleOn && !inWindow(cfg.scheduleHours, cfg.scheduleDays, now)) return skip("Fora da agenda")
         val cs = state.chats.getOrPut(msg.chat) { ChatState() }
         if (cs.pauseUntil > nowMs) return skip("Conversa pausada")
@@ -110,6 +108,21 @@ object Engine {
         }
         if (out.isEmpty()) return skip("Nenhuma regra serviu")
         return finish(msg, now, cfg, cs, nowMs, out, ruleName, formRow, random)
+    }
+
+    /** Reason to stay silent under the "Contatos" setting, or null to go on. [phoneNames] are normalized. */
+    fun audience(msg: Incoming, cfg: Config, phoneNames: Set<String>): String? {
+        if (msg.isGroup) return if (cfg.groupsOn) null else "Grupos desativados"
+        val name = normalize(msg.sender)
+        val inList = cfg.contactsList.lines().any { normalize(it).let { n -> n.isNotEmpty() && (n == name || n == normalize(msg.chat)) } }
+        // Without contacts permission, a sender shown as a name (not a number) counts as saved.
+        val saved = if (phoneNames.isEmpty()) msg.sender.any { it.isLetter() } else name in phoneNames
+        return when (cfg.contactsMode) {
+            Audience.ALL -> null
+            Audience.LIST -> if (inList) null else "Fora da lista de contatos"
+            Audience.EXCEPT_LIST -> if (inList) "Na lista de exceções" else null
+            Audience.EXCEPT_PHONE -> if (saved) "Contato salvo no telefone" else null
+        }
     }
 
     private fun skip(reason: String) = Decision(emptyList(), "", reason = reason)

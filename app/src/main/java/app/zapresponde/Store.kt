@@ -27,6 +27,10 @@ data class SheetCache(
 @Serializable
 data class Outbox(val historico: List<List<String>> = emptyList(), val pedidos: List<List<String>> = emptyList())
 
+/** What "Exportar backup" writes: all settings and the app's own rules (sheet rules live in the sheet). */
+@Serializable
+data class Backup(val app: String = "ZapResponde", val version: Int = 1, val config: Config = Config(), val rules: List<Rule> = emptyList())
+
 /** Single in-process store. Compose reads the mutableState fields; everything is persisted as JSON files. */
 object Store {
     val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -65,6 +69,15 @@ object Store {
         val tmp = File(dir, "$name.tmp")
         tmp.writeText(json.encodeToString(value))
         tmp.renameTo(File(dir, name))
+    }
+
+    fun exportBackup(): String = json.encodeToString(Backup(config = config, rules = rules))
+
+    /** Replaces settings and rules with a backup file's; throws with a readable message if it isn't one. */
+    fun importBackup(text: String) {
+        val b = runCatching { json.decodeFromString<Backup>(text) }.getOrNull()
+        require(b != null && b.app == "ZapResponde") { "Esse arquivo não é um backup do ZapResponde." }
+        updateConfig(b.config); updateRules(b.rules)
     }
 
     @Synchronized

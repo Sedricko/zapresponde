@@ -76,10 +76,13 @@ data class Config(
     val takeoverOn: Boolean = true,
     val takeoverMin: Int = 60,
     val loopGuardOn: Boolean = true,
-    val ignoreOn: Boolean = false,
+    val contactsOn: Boolean = false,
+    val contactsMode: Audience = Audience.EXCEPT_LIST,
+    /** One name per line, as the phone/WhatsApp shows it. */
+    val contactsList: String = "",
+    val groupsOn: Boolean = true,
     val freteOn: Boolean = false,
     val freteNotFound: String = "❌ *FRETE INDISPONÍVEL*\n\nEsta carga já foi fechada ou expirou. Confira novas oportunidades no grupo oficial:\n🔗 (cole aqui o link do grupo)",
-    val ignoreList: String = "",
     val sheetOn: Boolean = false,
     val sheetUrl: String = "",
     val sheetKey: String = "",
@@ -104,6 +107,10 @@ class ChatState(
 
 @Serializable
 class State(val chats: MutableMap<String, ChatState> = mutableMapOf())
+
+/** Who the app answers, on top of each rule's own filter. */
+@Serializable
+enum class Audience { ALL, LIST, EXCEPT_LIST, EXCEPT_PHONE }
 
 data class Incoming(
     val chat: String,

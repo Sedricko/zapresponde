@@ -58,6 +58,17 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -99,7 +110,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import app.zapresponde.Audience
 import app.zapresponde.Config
+import app.zapresponde.Contacts
 import app.zapresponde.Engine
 import app.zapresponde.Freq
 import app.zapresponde.Groups
@@ -150,7 +163,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "ignore" to "Ignorar contatos", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,7 +197,8 @@ fun App() {
                     "header" -> HeaderScreen()
                     "takeover" -> TakeoverScreen()
                     "loop" -> LoopScreen()
-                    "ignore" -> IgnoreScreen()
+                    "contacts" -> ContactsScreen()
+                    "backup" -> BackupScreen()
                     "frete" -> FreteScreen()
                     "test" -> TestScreen()
                     "help" -> HelpScreen()
@@ -623,10 +637,12 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
         Divider()
-        FeatureRow(Icons.Default.Close, "Ignorar contatos", "Não responde quem estiver na lista", c.ignoreOn, { on -> cfg { copy(ignoreOn = on) } }) { open("ignore") }
+        FeatureRow(Icons.Default.Person, "Contatos", AUDIENCE[c.contactsMode].orEmpty() + if (c.groupsOn) " · grupos sim" else " · grupos não", c.contactsOn, { on -> cfg { copy(contactsOn = on) } }) { open("contacts") }
     }
     Panel("Ferramentas") {
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
+        Divider()
+        FeatureRow(Icons.Default.Refresh, "Backup", "Exportar e importar configurações e regras", null) { open("backup") }
         Divider()
         FeatureRow(Icons.Default.Info, "Não está funcionando?", "Verifique permissões e bateria", null) { open("help") }
     }
@@ -721,12 +737,120 @@ fun LoopScreen() {
     Panel { Hint("Se o app responder 5 vezes à mesma conversa em 2 minutos, ela fica pausada por 30 minutos.") }
 }
 
+val AUDIENCE = mapOf(
+    Audience.ALL to "Todos",
+    Audience.LIST to "Só minha lista de contatos",
+    Audience.EXCEPT_LIST to "Todos, exceto minha lista",
+    Audience.EXCEPT_PHONE to "Exceto meus contatos do telefone",
+)
+
 @Composable
-fun IgnoreScreen() {
+fun ContactsScreen() {
     val c = Store.config
+    val ctx = LocalContext.current
+    var picking by remember { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { if (it) picking = true }
+    val list = c.contactsList.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    fun save(l: List<String>) = cfg { copy(contactsList = l.distinct().joinToString("\n")) }
+
+    Panel { SwitchRow("Ativar filtro de contatos", c.contactsOn) { cfg { copy(contactsOn = it) } } }
+    Panel("Resposta automática para") {
+        AUDIENCE.forEach { (mode, label) ->
+            Row(Modifier.fillMaxWidth().clickable { cfg { copy(contactsMode = mode) } }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(c.contactsMode == mode, { cfg { copy(contactsMode = mode) } })
+                Text(label)
+            }
+        }
+        Divider()
+        SwitchRow("Responder em grupos", c.groupsOn) { cfg { copy(groupsOn = it) } }
+        if (c.contactsMode == Audience.EXCEPT_PHONE && !Contacts.allowed(ctx)) Hint("Sem acesso aos contatos, o app considera salvo quem aparece com nome em vez de número.")
+    }
+    Panel("Lista de contatos (${list.size})") {
+        Button({ if (Contacts.allowed(ctx)) picking = true else ask.launch(Manifest.permission.READ_CONTACTS) }, Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Escolher dos contatos do telefone")
+        }
+        var typed by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Field("Ou digite um nome", typed) { typed = it } }
+            IconButton({ if (typed.isNotBlank()) { save(list + typed.trim()); typed = "" } }) { Icon(Icons.Default.Add, "Adicionar") }
+        }
+        list.forEach { name ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name, Modifier.weight(1f))
+                IconButton({ save(list - name) }) { Icon(Icons.Default.Close, "Remover") }
+            }
+        }
+        if (list.isEmpty()) Hint("Nenhum contato na lista.")
+    }
+    if (picking) ContactPicker(list, { picking = false }) { save(it); picking = false }
+}
+
+/** Full-screen list of the phone's contacts with search and checkboxes. */
+@Composable
+private fun ContactPicker(selected: List<String>, dismiss: () -> Unit, done: (List<String>) -> Unit) {
+    val ctx = LocalContext.current
+    var all by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(Unit) { all = withContext(Dispatchers.IO) { Contacts.all(ctx) } }
+    var query by remember { mutableStateOf("") }
+    val chosen = remember { mutableStateListOf<String>().apply { addAll(selected) } }
+    Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Escolher contatos (${chosen.size})", style = MaterialTheme.typography.titleLarge)
+                Field("Buscar", query) { query = it }
+                val q = Engine.normalize(query)
+                val shown = all.orEmpty().filter { q.isEmpty() || Engine.normalize(it).contains(q) }
+                if (all == null) Hint("Carregando contatos...")
+                LazyColumn(Modifier.weight(1f)) {
+                    items(shown) { name ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { if (name in chosen) chosen.remove(name) else chosen.add(name) },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(name in chosen, { if (it) chosen.add(name) else chosen.remove(name) })
+                            Text(name)
+                        }
+                    }
+                }
+                Row {
+                    TextButton({ chosen.removeAll(shown) }) { Text("Desmarcar visíveis") }
+                    TextButton({ chosen.addAll(shown.filter { it !in chosen }) }) { Text("Marcar visíveis") }
+                    Spacer(Modifier.weight(1f))
+                    Button({ done(chosen.toList()) }) { Text("Concluir") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BackupScreen() {
+    val ctx = LocalContext.current
+    var msg by remember { mutableStateOf("") }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) msg = runCatching {
+            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.exportBackup().toByteArray()) }
+            "Backup salvo."
+        }.getOrElse { "Não consegui salvar: ${it.message}" }
+    }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) msg = runCatching {
+            Store.importBackup(ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() })
+            Sheets.schedule(ctx)
+            "Backup restaurado: configurações e ${Store.rules.size} regras."
+        }.getOrElse { it.message ?: "Não consegui ler o arquivo." }
+    }
     Panel {
-        SwitchRow("Ativar ignorar contatos", c.ignoreOn) { cfg { copy(ignoreOn = it) } }
-        Field("Contatos e grupos para ignorar", c.ignoreList, lines = 3, help = "Nomes como aparecem no WhatsApp, separados por vírgula ou um por linha.") { cfg { copy(ignoreList = it) } }
+        Button({ export.launch("zapresponde-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".json") }, Modifier.fillMaxWidth()) {
+            Text("Exportar backup")
+        }
+        OutlinedButton({ import.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, Modifier.fillMaxWidth()) {
+            Text("Importar backup")
+        }
+        if (msg.isNotEmpty()) Hint(msg)
+    }
+    Panel {
+        Hint("O arquivo leva todas as configurações (inclusive o link e a chave da planilha) e as regras do app. Guarde no Google Drive ou mande para você mesmo. Importar substitui as configurações e regras atuais. O histórico não vai no backup.")
     }
 }
 

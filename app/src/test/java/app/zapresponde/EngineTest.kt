@@ -36,16 +36,23 @@ class EngineTest {
         assertEquals(listOf("Olá, bom dia"), run(msg("oi", sender = "+55 11 99999-0000"), listOf(rule)).replies)
     }
 
-    @Test fun ignoreList() {
+    @Test fun contacts() {
         val rule = Rule(match = Match.ALL, replies = listOf("ok"))
-        val meu = msg("oi", sender = "Meu")
-        assertEquals(listOf("ok"), run(meu, listOf(rule)).replies)
-        val ign = on.copy(ignoreOn = true, ignoreList = "João, Família, Meu")
-        assertTrue(run(meu, listOf(rule), ign).replies.isEmpty())
-        assertEquals(listOf("ok"), run(meu, listOf(rule), ign.copy(ignoreOn = false)).replies)
-        assertTrue(run(msg("oi", sender = "joao"), listOf(rule), ign).replies.isEmpty())
-        assertEquals(listOf("ok"), run(msg("oi"), listOf(rule), ign).replies)
-        assertTrue(run(msg("oi").copy(fromMe = true), listOf(rule)).replies.isEmpty())
+        fun ans(m: Incoming, cfg: Config, phone: Set<String> = emptySet()) =
+            Engine.decide(m, monday10, 1_000_000L, cfg, listOf(rule), emptyList(), State(), Random(1), phone).replies
+        val list = on.copy(contactsOn = true, contactsList = "João (Transportes Poloni)\nMeu")
+        val joao = msg("oi", sender = "Joao (Transportes Poloni)")
+        assertEquals(listOf("ok"), ans(joao, list.copy(contactsOn = false, contactsMode = Audience.LIST)))
+        assertTrue(ans(joao, list.copy(contactsMode = Audience.EXCEPT_LIST)).isEmpty())
+        assertEquals(listOf("ok"), ans(msg("oi"), list.copy(contactsMode = Audience.EXCEPT_LIST)))
+        assertEquals(listOf("ok"), ans(joao, list.copy(contactsMode = Audience.LIST)))
+        assertTrue(ans(msg("oi"), list.copy(contactsMode = Audience.LIST)).isEmpty())
+        val phone = list.copy(contactsMode = Audience.EXCEPT_PHONE)
+        assertTrue(ans(msg("oi"), phone, setOf("maria silva")).isEmpty())
+        assertEquals(listOf("ok"), ans(msg("oi", sender = "Pedro"), phone, setOf("maria silva")))
+        assertEquals(listOf("ok"), ans(msg("oi", sender = "+55 11 98888-0000"), phone))
+        val grp = msg("oi", group = "Família")
+        assertTrue(ans(grp, list.copy(groupsOn = false)).isEmpty())
     }
 
     @Test fun groupsAndContacts() {

@@ -67,7 +67,7 @@ class ReplyService : NotificationListenerService() {
         val d = synchronized(Store) {
             Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), cfg, Store.allRules(),
-                Store.sheet.consulta, Store.state,
+                Store.sheet.consulta, Store.state, phoneNames = Contacts.names(this),
             ).also { Store.saveState() }
         }
         Log.d(TAG, "${msg.chat}: ${d.reason}")
