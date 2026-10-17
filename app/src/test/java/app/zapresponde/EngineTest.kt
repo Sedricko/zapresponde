@@ -187,4 +187,15 @@ class EngineTest {
         assertEquals(null, Engine.parseConnectQr("""{"url":"https://evil.com/exec","key":"k1"}"""))
         assertEquals(null, Engine.parseConnectQr("texto qualquer"))
     }
+
+    @Test fun reasonsExplainSilence() {
+        val st = State()
+        val once = Rule(id = "a", name = "Saudação", match = Match.ALL, replies = listOf("x"), freq = Freq.ONCE)
+        run(msg("1"), listOf(once), state = st)
+        val d = run(msg("2"), listOf(once), state = st, now = 2_000_000L)
+        assertTrue(d.reason.contains("Saudação") && d.reason.contains("frequência"))
+        val soGrupo = Rule(name = "R", match = Match.ALL, replies = listOf("x"), who = Who.NONE)
+        assertTrue(run(msg("oi"), listOf(soGrupo)).reason.contains("não permitido"))
+        assertEquals("Nenhuma regra serviu", run(msg("oi"), emptyList()).reason)
+    }
 }
