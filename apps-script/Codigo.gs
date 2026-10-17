@@ -36,6 +36,7 @@ function novaChave() {
 }
 
 function doGet(e) {
+  if (!e) throw new Error('doGet só funciona quando o app chama o link. Para conectar, escolha a função "conectar" e clique em Executar.');
   if (e.parameter.key !== chave()) return saida({ error: 'chave incorreta' });
   const ss = SpreadsheetApp.getActive();
   const r = {};
