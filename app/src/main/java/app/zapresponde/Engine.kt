@@ -72,6 +72,11 @@ object Engine {
             }
         }
 
+        // Before the welcome: a FreteBras driver is a new contact, and should get only the freight answer.
+        if (cfg.freteOn) frete(msg.text, consulta, cfg.freteNotFound)?.let {
+            return finish(msg, now, cfg, cs, nowMs, listOf(it), "Fretes", null, random)
+        }
+
         if (cfg.welcomeOn) {
             val today = now.toLocalDate().toString()
             val due = if (cfg.welcomeDaily) cs.welcomedDay != today else cs.welcomedDay.isEmpty()
@@ -190,6 +195,49 @@ object Engine {
                 if (i < 26) acc.replace("{${'A' + i}}", v) else acc
             }
         }
+    }
+
+    data class Route(val from: String, val to: String, val cargo: String = "")
+
+    private fun place(city: String, uf: String) = normalize(city).replace(Regex("[^a-z0-9]"), "") + normalize(uf)
+
+    /** Origin/destination of a FreteBras message, from its sentence or, failing that, from the freight link. */
+    fun freteRoute(text: String): Route? {
+        val t = normalize(text)
+        Regex("""frete de ([^/\n]+)/([a-z]{2}) para ([^/\n]+)/([a-z]{2})(?: de ([a-z]+))?""").find(t)?.let { m ->
+            val g = m.groupValues
+            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5])
+        }
+        Regex("""fretebras\.com\.br/frete/.*?carga-de-([a-z0-9-]+?)-([a-z]{2})-para-([a-z0-9-]+?)-([a-z]{2})/(?:.*?/carga-([a-z]+))?""").find(t)?.let { m ->
+            val g = m.groupValues
+            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5])
+        }
+        return null
+    }
+
+    /** Route of a freight-sheet row: column A "Origem/UF para Destino/UF", or the ORIGEM:/DESTINO: lines of the message. */
+    private fun rowRoute(row: List<String>): Route? {
+        val a = normalize(row.firstOrNull().orEmpty())
+        Regex("""^([^/]+)/([a-z]{2}) para ([^/]+)/([a-z]{2})""").find(a)?.let { m ->
+            val g = m.groupValues
+            return Route(place(g[1], g[2]), place(g[3], g[4]))
+        }
+        val all = normalize(row.joinToString("\n"))
+        val o = Regex("""origem:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
+        val d = Regex("""destino:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
+        return Route(place(o[1], o[2]), place(d[1], d[2]))
+    }
+
+    /**
+     * FreteBras "estou disponível para carregar seu frete" → the ready message of the matching row
+     * (its longest cell), preferring one with the same cargo type; no match → [notFound] (blank = stay silent).
+     * Null when the message is not a FreteBras one.
+     */
+    fun frete(text: String, rows: List<List<String>>, notFound: String): String? {
+        val r = freteRoute(text) ?: return null
+        val hits = rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }
+        val best = hits.firstOrNull { r.cargo.isNotEmpty() && hasWord(normalize(it.joinToString(" ")), r.cargo) } ?: hits.firstOrNull()
+        return best?.maxByOrNull { it.length }?.trim() ?: notFound.ifBlank { null }
     }
 
     private fun col(letter: String) = (letter.trim().uppercase().firstOrNull() ?: 'A') - 'A'

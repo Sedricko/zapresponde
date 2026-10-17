@@ -77,6 +77,8 @@ data class Config(
     val takeoverMin: Int = 60,
     val loopGuardOn: Boolean = true,
     val ignoreOn: Boolean = false,
+    val freteOn: Boolean = false,
+    val freteNotFound: String = "❌ *FRETE INDISPONÍVEL*\n\nEsta carga já foi fechada ou expirou. Confira novas oportunidades no grupo oficial:\n🔗 (cole aqui o link do grupo)",
     val ignoreList: String = "",
     val sheetOn: Boolean = false,
     val sheetUrl: String = "",

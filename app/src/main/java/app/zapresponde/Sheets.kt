@@ -74,6 +74,11 @@ object Sheets {
         parse(body)
     }
 
+    fun refresh(cfg: Config) {
+        val (respostas, consulta) = read(cfg)
+        Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
+    }
+
     fun historyRow(e: HistoryEntry) = listOf(
         SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.US).format(Date(e.time)),
         e.app, e.chat, if (e.isGroup) "grupo" else "contato", e.text, e.reply, e.rule,
@@ -110,8 +115,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 Sheets.append(cfg, "Pedidos", listOf("Data", "Conversa") + qs, box.pedidos)
             }
             Store.sent(box.historico.size, box.pedidos.size)
-            val (respostas, consulta) = Sheets.read(cfg)
-            Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
+            Sheets.refresh(cfg)
             Result.success()
         } catch (e: Exception) {
             Store.updateSheet(Store.sheet.copy(error = e.message ?: e.toString()))

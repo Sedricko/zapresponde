@@ -115,6 +115,28 @@ class EngineTest {
         assertEquals(listOf("Curitiba: R$ 3.000, 12 t\n\nCuritiba: R$ 2.500, 8 t"), run(msg("tem carga pra curitiba?"), listOf(c), consulta = cargas).replies)
     }
 
+    @Test fun frete() {
+        val sheet = listOf(
+            listOf("ONLINE | ATUALIZAÇÃO: 11:49:26", ""),
+            listOf("Ponta Grossa/PR para Rio de Janeiro/RJ", "🚛 *FRETE DISPONÍVEL*\n*ORIGEM:* PONTA GROSSA/PR\n*CARGA:* 31 Ton | Bebida"),
+            listOf("", "🚛 *FRETE DISPONÍVEL*\n*ORIGEM:* PATOS DE MINAS/MG\n*DESTINO:* RIO DE JANEIRO/RJ\n*CARGA:* 26 Ton | Alimenticio"),
+            listOf("Patos de Minas/MG para Rio de Janeiro/RJ", "🚛 *FRETE DISPONÍVEL*\n*ORIGEM:* PATOS DE MINAS/MG\n*CARGA:* 10 Ton | Bebida"),
+        )
+        val msgPg = "Olá, sou Marco e estou disponível para carregar seu frete de Ponta Grossa/PR para Rio de Janeiro/RJ de BEBIDA.\n\nA carga ainda está disponível?"
+        assertTrue(Engine.frete(msgPg, sheet, "x")!!.contains("31 Ton"))
+        val msgPatos = "estou disponível para carregar seu frete de Patos de Minas/MG para Rio de Janeiro/RJ de ALIMENTICIO."
+        assertTrue(Engine.frete(msgPatos, sheet, "x")!!.contains("Alimenticio"))
+        val soLink = "Frete: https://www.fretebras.com.br/frete/transportes-poloni/carga-de-ponta-grossa-pr-para-rio-de-janeiro-rj/veiculo-carreta/especie-pallet/carga-bebida/1753372597044/"
+        assertTrue(Engine.frete(soLink, sheet, "x")!!.contains("31 Ton"))
+        val fechada = "estou disponível para carregar seu frete de Cristalina/GO para Cariacica/ES de ALIMENTICIO."
+        assertEquals("x", Engine.frete(fechada, sheet, "x"))
+        assertEquals(null, Engine.frete(fechada, sheet, ""))
+        assertEquals(null, Engine.frete("oi, bom dia", sheet, "x"))
+        val rule = Rule(match = Match.ALL, replies = listOf("regra"))
+        assertEquals(listOf("x"), run(msg(fechada), listOf(rule), on.copy(freteOn = true, freteNotFound = "x"), consulta = sheet).replies)
+        assertEquals(listOf("regra"), run(msg(fechada), listOf(rule), consulta = sheet).replies)
+    }
+
     @Test fun sheetRows() {
         val rules = Engine.rulesFromSheet(listOf(
             listOf("Palavras", "Resposta", "Comparação", "Quem", "Ativo"),

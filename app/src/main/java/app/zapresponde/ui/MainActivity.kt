@@ -150,7 +150,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "ignore" to "Ignorar contatos", "test" to "Testar respostas", "help" to "Não está funcionando?",
+    "loop" to "Proteção contra loop", "ignore" to "Ignorar contatos", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -185,6 +185,7 @@ fun App() {
                     "takeover" -> TakeoverScreen()
                     "loop" -> LoopScreen()
                     "ignore" -> IgnoreScreen()
+                    "frete" -> FreteScreen()
                     "test" -> TestScreen()
                     "help" -> HelpScreen()
                 }
@@ -605,6 +606,8 @@ fun HistoryScreen() {
 fun MoreTab(open: (String) -> Unit) {
     val c = Store.config
     Panel("Respostas") {
+        FeatureRow(Icons.Default.Search, "Fretes FreteBras", "Responde o motorista com a carga da rota", c.freteOn, { on -> cfg { copy(freteOn = on) } }) { open("frete") }
+        Divider()
         FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
         Divider()
         FeatureRow(Icons.Default.ShoppingCart, "Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { open("form") }
@@ -724,6 +727,18 @@ fun IgnoreScreen() {
     Panel {
         SwitchRow("Ativar ignorar contatos", c.ignoreOn) { cfg { copy(ignoreOn = it) } }
         Field("Contatos e grupos para ignorar", c.ignoreList, lines = 3, help = "Nomes como aparecem no WhatsApp, separados por vírgula ou um por linha.") { cfg { copy(ignoreList = it) } }
+    }
+}
+
+@Composable
+fun FreteScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Ativar respostas de fretes", c.freteOn) { cfg { copy(freteOn = it) } }
+        Field("Quando a carga não estiver na planilha", c.freteNotFound, lines = 5, help = "Deixe vazio para não responder.") { cfg { copy(freteNotFound = it) } }
+    }
+    Panel {
+        Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, usa a do mesmo tipo de carga.")
     }
 }
 

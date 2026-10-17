@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 
 class ReplyService : NotificationListenerService() {
@@ -50,6 +51,19 @@ class ReplyService : NotificationListenerService() {
             pending.remove(msg.chat)?.cancel()
             Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)
         }
+        // The freight sheet changes all the time; read it fresh so a new load is not answered as "indisponível".
+        if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && Engine.freteRoute(msg.text) != null) {
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { Sheets.refresh(cfg) } }
+                answer(msg, action, sbn)
+            }
+            return
+        }
+        answer(msg, action, sbn)
+    }
+
+    private fun answer(msg: Incoming, action: Notification.Action, sbn: StatusBarNotification) {
+        val cfg = Store.config
         val d = synchronized(Store) {
             Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), cfg, Store.allRules(),
