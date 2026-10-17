@@ -8,30 +8,73 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,8 +83,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import app.zapresponde.Config
@@ -68,255 +115,540 @@ class MainActivity : ComponentActivity() {
         Store.init(this)
         Sheets.schedule(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        setContent {
-            MaterialTheme(if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { App() }
-            }
-        }
+        setContent { ZapTheme { App() } }
     }
 }
 
 private fun cfg(f: Config.() -> Config) = Store.updateConfig(Store.config.f())
 
+private data class Tab(val key: String, val label: String, val icon: ImageVector)
+
+private val TABS = listOf(
+    Tab("home", "Início", Icons.Default.Home),
+    Tab("rules", "Regras", Icons.Default.Build),
+    Tab("sheet", "Planilha", Icons.AutoMirrored.Filled.List),
+    Tab("history", "Histórico", Icons.Default.Notifications),
+    Tab("more", "Ajustes", Icons.Default.Settings),
+)
+
+private val TITLES = mapOf(
+    "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
+    "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
+    "loop" to "Proteção contra loop", "test" to "Testar respostas", "help" to "Não está funcionando?",
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
-    var screen by rememberSaveable { mutableStateOf("home") }
-    var ruleId by rememberSaveable { mutableStateOf("") }
-    BackHandler(screen != "home") { screen = if (screen == "rule") "rules" else "home" }
-    val go: (String) -> Unit = { screen = it }
-    Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        if (screen != "home") TextButton({ screen = if (screen == "rule") "rules" else "home" }) { Text("← Voltar") }
-        when (screen) {
-            "home" -> Home(go)
-            "rules" -> RulesScreen { ruleId = it; screen = "rule" }
-            "rule" -> RuleEdit(ruleId) { screen = "rules" }
-            "sheet" -> SheetScreen()
-            "welcome" -> WelcomeScreen()
-            "delay" -> DelayScreen()
-            "schedule" -> ScheduleScreen()
-            "header" -> HeaderScreen()
-            "form" -> FormScreen()
-            "takeover" -> TakeoverScreen()
-            "loop" -> LoopScreen()
-            "test" -> TestScreen()
-            "history" -> HistoryScreen()
-            "help" -> HelpScreen()
+    var tab by rememberSaveable { mutableStateOf("home") }
+    // Detail screen on top of the tabs: a feature key or "rule:<id>".
+    var sub by rememberSaveable { mutableStateOf("") }
+    var newRule by remember { mutableStateOf(false) }
+    BackHandler(sub.isNotEmpty() || tab != "home") { if (sub.isNotEmpty()) sub = "" else tab = "home" }
+    val open: (String) -> Unit = { sub = it }
+    val bar = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+
+    if (sub.isNotEmpty()) {
+        val ruleId = sub.removePrefix("rule:").takeIf { sub.startsWith("rule:") }
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(if (ruleId != null) "Editar regra" else TITLES[sub].orEmpty()) }, colors = bar,
+                    navigationIcon = { IconButton({ sub = "" }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
+                )
+            },
+        ) { pad ->
+            Page(pad) {
+                if (ruleId != null) RuleEdit(ruleId) { sub = "" }
+                else when (sub) {
+                    "welcome" -> WelcomeScreen()
+                    "form" -> FormScreen()
+                    "delay" -> DelayScreen()
+                    "schedule" -> ScheduleScreen()
+                    "header" -> HeaderScreen()
+                    "takeover" -> TakeoverScreen()
+                    "loop" -> LoopScreen()
+                    "test" -> TestScreen()
+                    "help" -> HelpScreen()
+                }
+            }
         }
-        Spacer(Modifier.height(48.dp))
+        return
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        if (tab == "home") "ZapResponde" else TABS.first { it.key == tab }.label,
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                colors = bar,
+            )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                TABS.forEach { t ->
+                    NavigationBarItem(tab == t.key, { tab = t.key }, { Icon(t.icon, null) }, label = { Text(t.label) })
+                }
+            }
+        },
+        floatingActionButton = {
+            if (tab == "rules") ExtendedFloatingActionButton(
+                onClick = { newRule = true }, icon = { Icon(Icons.Default.Add, null) }, text = { Text("Nova regra") },
+                containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+        },
+    ) { pad ->
+        Page(pad) {
+            when (tab) {
+                "home" -> Home(open, { tab = it }, { newRule = true })
+                "rules" -> RulesTab(open)
+                "sheet" -> SheetScreen()
+                "history" -> HistoryScreen()
+                "more" -> MoreTab(open)
+            }
+        }
+    }
+    if (newRule) NewRuleDialog({ newRule = false }) { r ->
+        newRule = false
+        Store.updateRules(Store.rules + r)
+        tab = "rules"; sub = "rule:${r.id}"
     }
 }
 
 @Composable
-fun Home(go: (String) -> Unit) {
+private fun Page(pad: PaddingValues, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+        content()
+        Spacer(Modifier.height(96.dp))
+    }
+}
+
+// ---------- Início ----------
+
+@Composable
+fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
     val c = Store.config
     val ctx = LocalContext.current
     val access = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-    Text("ZapResponde", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-    Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            SwitchRow(
-                if (c.enabled) "Respostas automáticas LIGADAS" else "Respostas automáticas desligadas", c.enabled,
-            ) { on -> cfg { copy(enabled = on) } }
-            if (!access) {
-                Text("Falta liberar o acesso às notificações para o app conseguir responder.", color = MaterialTheme.colorScheme.error)
-                Button({ ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Liberar acesso") }
+    val bg by animateColorAsState(if (c.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh, label = "bg")
+    val fg = if (c.enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+
+    Card(
+        Modifier.fillMaxWidth().padding(top = 4.dp), shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = bg),
+    ) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(if (c.enabled) "Respondendo" else "Pausado", style = MaterialTheme.typography.headlineSmall, color = fg, fontWeight = FontWeight.Bold)
+                Text(
+                    if (c.enabled) "As mensagens do WhatsApp estão sendo respondidas" else "Toque no botão para começar a responder",
+                    style = MaterialTheme.typography.bodyMedium, color = fg.copy(alpha = 0.85f),
+                )
             }
+            Box(
+                Modifier.size(72.dp).clip(CircleShape).background(fg.copy(alpha = 0.15f))
+                    .border(3.dp, fg.copy(alpha = 0.6f), CircleShape).clickable { cfg { copy(enabled = !enabled) } },
+                contentAlignment = Alignment.Center,
+            ) { Text(if (c.enabled) "ON" else "OFF", color = fg, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge) }
         }
     }
-    val n = Store.rules.count { it.enabled }
-    FeatureCard("Regras", "$n regras ativas no app" + if (c.sheetOn) " + ${Store.sheet.rules.count { it.enabled }} da planilha" else "", null) { go("rules") }
-    FeatureCard("Google Sheets", "Respostas, consulta, pedidos e histórico na planilha", c.sheetOn, { on -> cfg { copy(sheetOn = on) }; Sheets.schedule(ctx) }) { go("sheet") }
-    FeatureCard("Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { go("welcome") }
-    FeatureCard("Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { go("form") }
-    FeatureCard("Atraso humano", "Espera entre ${c.delayMinSec}s e ${c.delayMaxSec}s antes de responder", c.delayOn, { on -> cfg { copy(delayOn = on) } }) { go("delay") }
-    FeatureCard("Agenda", "Só responde em certos horários: ${c.scheduleHours}", c.scheduleOn, { on -> cfg { copy(scheduleOn = on) } }) { go("schedule") }
-    FeatureCard("Cabeçalho e rodapé", "Texto fixo antes e depois das respostas", c.headerFooterOn, { on -> cfg { copy(headerFooterOn = on) } }) { go("header") }
-    FeatureCard("Pausa quando você assume", "Para de responder por ${c.takeoverMin} min se você abrir a conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { go("takeover") }
-    FeatureCard("Proteção contra loop", "Pausa a conversa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { go("loop") }
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        OutlinedButton({ go("test") }, Modifier.weight(1f)) { Text("Testar") }
-        OutlinedButton({ go("history") }, Modifier.weight(1f).padding(horizontal = 4.dp)) { Text("Histórico") }
-        OutlinedButton({ go("help") }, Modifier.weight(1f)) { Text("Não funciona?") }
+
+    if (!access) Card(
+        Modifier.fillMaxWidth().padding(top = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
+            Text("Libere o acesso às notificações para o app conseguir responder.", Modifier.weight(1f).padding(horizontal = 12.dp))
+            TextButton({ ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Liberar") }
+        }
+    }
+
+    val now = System.currentTimeMillis()
+    val h = Store.history
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Stat("Hoje", h.count { now - it.time < 86_400_000 }.toString(), Modifier.weight(1f))
+        Stat("Total", h.size.toString(), Modifier.weight(1f))
+        Stat("Regras ativas", Store.allRules().count { it.enabled }.toString(), Modifier.weight(1f))
+    }
+
+    Panel("Atalhos") {
+        FeatureRow(Icons.Default.Add, "Criar regra", "Responder automaticamente a uma palavra", null) { newRule() }
+        Divider()
+        FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem e veja o que seria enviado", null) { open("test") }
+        if (c.sheetOn) {
+            Divider()
+            FeatureRow(Icons.Default.Refresh, "Sincronizar planilha", syncText(), null) { Sheets.syncNow(ctx) }
+        }
+    }
+
+    Panel("Últimas respostas") {
+        if (h.isEmpty()) Hint("Nenhuma resposta enviada ainda.")
+        h.take(3).forEachIndexed { i, e ->
+            if (i > 0) Divider()
+            HistoryItem(e)
+        }
+        if (h.size > 3) TextButton({ goTab("history") }) { Text("Ver todas") }
     }
 }
 
 @Composable
-fun RulesScreen(edit: (String) -> Unit) {
-    Text("Regras", style = MaterialTheme.typography.headlineSmall)
-    Text("Testadas de cima para baixo. A primeira que servir responde.", style = MaterialTheme.typography.bodySmall)
+private fun Stat(label: String, value: String, modifier: Modifier) {
+    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.padding(14.dp)) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ---------- Regras ----------
+
+@Composable
+fun RulesTab(open: (String) -> Unit) {
+    Hint("Testadas de cima para baixo. A primeira que servir responde.")
     val rules = Store.rules
-    rules.forEachIndexed { i, r ->
-        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Column(Modifier.padding(12.dp)) {
-                SwitchRow(r.name, r.enabled, "${r.match.label}: ${r.keywords.take(40)}") { on ->
-                    Store.updateRules(rules.map { if (it.id == r.id) it.copy(enabled = on) else it })
+    if (rules.isEmpty()) Panel { Hint("Nenhuma regra ainda. Toque em \"Nova regra\".") }
+    rules.forEach { r ->
+        Card(
+            Modifier.fillMaxWidth().padding(vertical = 5.dp).clickable { open("rule:${r.id}") },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        ) {
+            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBubble(
+                    if (r.kind == Kind.LOOKUP) Icons.Default.Search else Icons.AutoMirrored.Filled.Send,
+                    if (r.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                )
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text(r.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (r.match == Match.ALL) "Qualquer mensagem" else "${r.match.label}: ${r.keywords}",
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "→ " + if (r.kind == Kind.LOOKUP) "consulta na planilha" else r.replies.firstOrNull().orEmpty(),
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Row {
-                    TextButton({ edit(r.id) }) { Text("Configurar") }
-                    TextButton({ if (i > 0) Store.updateRules(rules.toMutableList().apply { add(i - 1, removeAt(i)) }) }) { Text("↑") }
-                    TextButton({ if (i < rules.lastIndex) Store.updateRules(rules.toMutableList().apply { add(i + 1, removeAt(i)) }) }) { Text("↓") }
-                }
+                Switch(r.enabled, { on -> Store.updateRules(rules.map { if (it.id == r.id) it.copy(enabled = on) else it }) })
             }
         }
     }
-    Button({ val r = Rule(); Store.updateRules(rules + r); edit(r.id) }, Modifier.fillMaxWidth()) { Text("+ Nova regra") }
-    if (Store.config.sheetOn && Store.sheet.rules.isNotEmpty()) {
-        Section("Da planilha (edite na aba Respostas)")
-        Store.sheet.rules.forEach { Text("• ${it.keywords.ifBlank { "(qualquer)" }} → ${it.replies.first().take(50)}") }
+    if (Store.config.sheetOn && Store.sheet.rules.isNotEmpty()) Panel("Da planilha · edite na aba Respostas") {
+        Store.sheet.rules.forEachIndexed { i, r ->
+            if (i > 0) Divider()
+            Column(Modifier.padding(vertical = 8.dp)) {
+                Text(r.keywords.ifBlank { "Qualquer mensagem" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text("→ " + r.replies.first(), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
+}
+
+@Composable
+private fun NewRuleDialog(dismiss: () -> Unit, create: (Rule) -> Unit) {
+    AlertDialog(
+        onDismissRequest = dismiss, confirmButton = {}, dismissButton = { TextButton(dismiss) { Text("Cancelar") } },
+        title = { Text("Que tipo de regra?") },
+        text = {
+            Column {
+                FeatureRow(Icons.AutoMirrored.Filled.Send, "Responder a palavras", "Ex.: quando falarem \"preço\", enviar a tabela", null) {
+                    create(Rule(name = "Nova resposta"))
+                }
+                FeatureRow(Icons.Default.Person, "Responder todo mundo", "Ex.: \"Estou ausente, já retorno\"", null) {
+                    create(Rule(name = "Ausente", match = Match.ALL, freq = Freq.INTERVAL, intervalMin = 240, replies = listOf("Olá {primeiro_nome}! No momento não posso responder, retorno em breve.")))
+                }
+                FeatureRow(Icons.Default.Search, "Consultar a planilha", "Ex.: status do pedido pelo código", null) {
+                    create(Rule(name = "Consulta", kind = Kind.LOOKUP, keywords = "pedido", template = "Pedido {busca}: {resultado}", fallback = "Não encontrei esse código."))
+                }
+            }
+        },
+    )
 }
 
 @Composable
 fun RuleEdit(id: String, done: () -> Unit) {
     val rules = Store.rules
-    val r = rules.firstOrNull { it.id == id } ?: return
+    val idx = rules.indexOfFirst { it.id == id }
+    if (idx < 0) return
+    val r = rules[idx]
     fun set(f: Rule.() -> Rule) = Store.updateRules(rules.map { if (it.id == id) it.f() else it })
-    Field("Nome da regra", r.name) { set { copy(name = it) } }
-    SwitchRow("Regra ativa", r.enabled) { set { copy(enabled = it) } }
-    Choice("Tipo", r.kind, Kind.entries, { it.label }) { set { copy(kind = it) } }
 
-    Section("Quando responder")
-    Choice("Comparação", r.match, Match.entries, { it.label }) { set { copy(match = it) } }
-    if (r.match != Match.ALL) Field(
-        "Palavras-chave", r.keywords, 2,
-        when (r.match) {
-            Match.WILDCARD -> "* = qualquer coisa, // = ou. Ex.: oi*tudo bem//ola*"
-            Match.REGEX -> "Expressão regular"
-            else -> "Separe por vírgula. Maiúsculas e acentos são ignorados."
-        },
-    ) { set { copy(keywords = it) } }
-    if (r.match == Match.SIMILAR) NumberField("Semelhança mínima (%)", r.similarity) { set { copy(similarity = it.coerceIn(1, 100)) } }
-    Field("Não responder se tiver", r.exclude, help = "Palavras separadas por vírgula") { set { copy(exclude = it) } }
-
-    Section("Resposta")
-    if (r.kind == Kind.TEXT) {
-        Choice("Modo", r.replyMode, ReplyMode.entries, { it.label }) { set { copy(replyMode = it) } }
-        r.replies.forEachIndexed { i, text ->
-            Field("Resposta ${i + 1}", text, 3) { v -> set { copy(replies = replies.toMutableList().also { it[i] = v }) } }
-        }
-        Row {
-            TextButton({ set { copy(replies = replies + "") } }) { Text("+ Resposta") }
-            if (r.replies.size > 1) TextButton({ set { copy(replies = replies.dropLast(1)) } }) { Text("− Remover última") }
-        }
-        Text(VARS, style = MaterialTheme.typography.bodySmall)
-    } else {
-        Text("Procura na aba Consulta uma linha cujo valor da coluna de busca aparece na mensagem.", style = MaterialTheme.typography.bodySmall)
-        Field("Coluna de busca", r.searchCol) { set { copy(searchCol = it.take(1).uppercase()) } }
-        Field("Coluna da resposta", r.returnCol) { set { copy(returnCol = it.take(1).uppercase()) } }
-        Field("Modelo", r.template, 2, "Use {busca} e {resultado}") { set { copy(template = it) } }
-        Field("Se não achar", r.fallback, 2) { set { copy(fallback = it) } }
+    Panel {
+        Field("Nome da regra", r.name) { set { copy(name = it) } }
+        SwitchRow("Regra ativa", r.enabled) { set { copy(enabled = it) } }
     }
 
-    Section("Para quem")
-    Choice("Contatos", r.who, Who.entries, { it.label }) { set { copy(who = it) } }
-    if (r.who == Who.LIST || r.who == Who.EXCEPT_LIST) Field("Lista de contatos", r.whoList, 2, "Nomes como aparecem no WhatsApp, separados por vírgula") { set { copy(whoList = it) } }
-    Choice("Grupos", r.groups, Groups.entries, { it.label }) { set { copy(groups = it) } }
-    if (r.groups == Groups.LIST || r.groups == Groups.EXCEPT_LIST) Field("Lista de grupos", r.groupList, 2) { set { copy(groupList = it) } }
+    Panel("Quando chegar") {
+        Choice("Tipo de mensagem", r.match, Match.entries, { it.label }) { set { copy(match = it) } }
+        if (r.match != Match.ALL) Field(
+            "Palavras-chave", r.keywords, 2,
+            when (r.match) {
+                Match.WILDCARD -> "* = qualquer coisa, // = ou. Ex.: oi*tudo bem//ola*"
+                Match.REGEX -> "Expressão regular"
+                else -> "Separe por vírgula. Maiúsculas e acentos não importam."
+            },
+        ) { set { copy(keywords = it) } }
+    }
 
-    Section("Frequência por conversa")
-    Choice("Responder", r.freq, Freq.entries, { it.label }) { set { copy(freq = it) } }
-    if (r.freq == Freq.INTERVAL) NumberField("Minutos entre respostas", r.intervalMin) { set { copy(intervalMin = it) } }
-    if (r.freq == Freq.MAX) NumberField("Máximo de respostas", r.maxReplies) { set { copy(maxReplies = it) } }
+    if (r.kind == Kind.TEXT) Panel("Responder com") {
+        r.replies.forEachIndexed { i, text ->
+            Field(if (r.replies.size > 1) "Resposta ${i + 1}" else "Resposta", text, 3) { v ->
+                set { copy(replies = replies.toMutableList().also { it[i] = v }) }
+            }
+        }
+        Row {
+            TextButton({ set { copy(replies = replies + "", replyMode = if (replyMode == ReplyMode.SINGLE) ReplyMode.RANDOM else replyMode) } }) { Text("+ Outra resposta") }
+            if (r.replies.size > 1) TextButton({ set { copy(replies = replies.dropLast(1)) } }) { Text("Remover última") }
+        }
+        if (r.replies.size > 1) Choice("Com várias respostas", r.replyMode, ReplyMode.entries, { it.label }) { set { copy(replyMode = it) } }
+        Hint(VARS)
+    } else Panel("Consulta na planilha") {
+        Hint("Procura na aba Consulta uma linha cujo valor da coluna de busca aparece na mensagem.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) { Field("Coluna de busca", r.searchCol) { set { copy(searchCol = it.take(1).uppercase()) } } }
+            Box(Modifier.weight(1f)) { Field("Coluna da resposta", r.returnCol) { set { copy(returnCol = it.take(1).uppercase()) } } }
+        }
+        Field("Modelo da resposta", r.template, 2, "Use {busca} e {resultado}") { set { copy(template = it) } }
+        Field("Se não encontrar", r.fallback, 2) { set { copy(fallback = it) } }
+    }
 
-    Section("Horários")
-    Field("Horários", r.hours, help = "Vazio = o dia todo. Ex.: 08:00-12:00, 14:00-18:00") { set { copy(hours = it) } }
-    DaysPicker(r.days) { set { copy(days = it) } }
+    Panel {
+        Advanced {
+            Choice("Tipo de regra", r.kind, Kind.entries, { it.label }) { set { copy(kind = it) } }
+            if (r.match == Match.SIMILAR) NumberField("Semelhança mínima", r.similarity, "%") { set { copy(similarity = it.coerceIn(1, 100)) } }
+            Field("Não responder se tiver", r.exclude, help = "Palavras separadas por vírgula") { set { copy(exclude = it) } }
+            Divider()
+            Choice("Contatos", r.who, Who.entries, { it.label }) { set { copy(who = it) } }
+            if (r.who == Who.LIST || r.who == Who.EXCEPT_LIST) Field("Lista de contatos", r.whoList, 2, "Nomes como aparecem no WhatsApp, separados por vírgula") { set { copy(whoList = it) } }
+            Choice("Grupos", r.groups, Groups.entries, { it.label }) { set { copy(groups = it) } }
+            if (r.groups == Groups.LIST || r.groups == Groups.EXCEPT_LIST) Field("Lista de grupos", r.groupList, 2) { set { copy(groupList = it) } }
+            Divider()
+            Choice("Frequência por conversa", r.freq, Freq.entries, { it.label }) { set { copy(freq = it) } }
+            if (r.freq == Freq.INTERVAL) NumberField("Intervalo", r.intervalMin, "min") { set { copy(intervalMin = it) } }
+            if (r.freq == Freq.MAX) NumberField("Máximo de respostas", r.maxReplies) { set { copy(maxReplies = it) } }
+            Divider()
+            Field("Horários", r.hours, help = "Vazio = o dia todo. Ex.: 08:00-12:00, 14:00-18:00") { set { copy(hours = it) } }
+            DaysPicker(r.days) { set { copy(days = it) } }
+        }
+    }
 
-    Spacer(Modifier.height(16.dp))
-    OutlinedButton({ Store.updateRules(rules.filter { it.id != id }); done() }) { Text("Apagar regra") }
+    Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton({ if (idx > 0) Store.updateRules(rules.toMutableList().apply { add(idx - 1, removeAt(idx)) }) }, enabled = idx > 0) {
+            Icon(Icons.Default.KeyboardArrowUp, null); Text("Subir")
+        }
+        OutlinedButton({ if (idx < rules.lastIndex) Store.updateRules(rules.toMutableList().apply { add(idx + 1, removeAt(idx)) }) }, enabled = idx < rules.lastIndex) {
+            Icon(Icons.Default.KeyboardArrowDown, null); Text("Descer")
+        }
+        Spacer(Modifier.weight(1f))
+        TextButton({ Store.updateRules(rules.filter { it.id != id }); done() }) {
+            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+            Text("Apagar", color = MaterialTheme.colorScheme.error)
+        }
+    }
 }
 
 const val VARS = "Variáveis: {nome} {primeiro_nome} {mensagem} {data} {hora} {dia_semana} {saudacao} {grupo} {contador}"
+
+// ---------- Planilha ----------
+
+private fun syncText(): String {
+    val s = Store.sheet
+    return when {
+        s.error.isNotEmpty() -> "Erro: ${s.error}"
+        s.syncedAt > 0 -> "Sincronizada em ${fmt(s.syncedAt)}"
+        else -> "Ainda não sincronizada"
+    }
+}
 
 @Composable
 fun SheetScreen() {
     val c = Store.config
     val ctx = LocalContext.current
-    Text("Google Sheets", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Usar planilha", c.sheetOn) { on -> cfg { copy(sheetOn = on) }; Sheets.schedule(ctx) }
-    Text(
-        "1. Na planilha, abra Extensões > Apps Script.\n2. Cole o código do arquivo apps-script/Codigo.gs e troque a CHAVE.\n" +
-            "3. Implantar > Nova implantação > App da Web, executar como você, acesso: qualquer pessoa.\n4. Cole aqui o link e a chave.",
-        style = MaterialTheme.typography.bodySmall,
-    )
-    Field("Link do Apps Script", c.sheetUrl, help = "Termina em /exec") { cfg { copy(sheetUrl = it.trim()) } }
-    Field("Chave", c.sheetKey) { cfg { copy(sheetKey = it) } }
-    NumberField("Sincronizar a cada (minutos, mínimo 15)", c.sheetSyncMin) { cfg { copy(sheetSyncMin = it) } }
-    SwitchRow("Respostas da aba Respostas", c.sheetRulesOn, "A: palavras, B: resposta, C: comparação, D: quem, E: ativo") { cfg { copy(sheetRulesOn = it) } }
-    SwitchRow("Gravar histórico na aba Historico", c.sheetLogOn) { cfg { copy(sheetLogOn = it) } }
-    Text("A aba Consulta é usada pelas regras do tipo \"Consulta na planilha\". A aba Pedidos, pela função Pedido pela conversa.", style = MaterialTheme.typography.bodySmall)
-    Button({ Sheets.schedule(ctx); Sheets.syncNow(ctx) }, Modifier.padding(top = 8.dp)) { Text("Sincronizar agora") }
     val s = Store.sheet
-    if (s.syncedAt > 0) Text("Última sincronização: ${fmt(s.syncedAt)} · ${s.rules.size} respostas · ${maxOf(0, s.consulta.size - 1)} linhas de consulta")
-    if (s.error.isNotEmpty()) Text("Erro: ${s.error}", color = MaterialTheme.colorScheme.error)
-    if (Store.outbox.historico.isNotEmpty() || Store.outbox.pedidos.isNotEmpty())
-        Text("Aguardando envio: ${Store.outbox.historico.size} linhas de histórico, ${Store.outbox.pedidos.size} pedidos")
+    val ok = c.sheetOn && s.syncedAt > 0 && s.error.isEmpty()
+    Panel {
+        Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconBubble(
+                if (ok) Icons.Default.CheckCircle else Icons.Default.Info,
+                if (s.error.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, 48,
+            )
+            Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                Text(if (ok) "Planilha conectada" else "Google Sheets", style = MaterialTheme.typography.titleMedium)
+                Text(syncText(), style = MaterialTheme.typography.bodySmall, color = if (s.error.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(c.sheetOn, { on -> cfg { copy(sheetOn = on) }; Sheets.schedule(ctx) })
+        }
+        if (ok) Hint("${s.rules.size} respostas · ${maxOf(0, s.consulta.size - 1)} linhas de consulta")
+        val box = Store.outbox
+        if (box.historico.isNotEmpty() || box.pedidos.isNotEmpty()) Hint("Aguardando envio: ${box.historico.size} no histórico, ${box.pedidos.size} pedidos")
+        FilledTonalButton({ Sheets.schedule(ctx); Sheets.syncNow(ctx) }, Modifier.padding(bottom = 8.dp), enabled = c.sheetOn) {
+            Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Sincronizar agora")
+        }
+    }
+    Panel("Conexão") {
+        Field("Link do Apps Script", c.sheetUrl, help = "Termina em /exec") { cfg { copy(sheetUrl = it.trim()) } }
+        Field("Chave", c.sheetKey, help = "A mesma senha que você colocou no script") { cfg { copy(sheetKey = it) } }
+        NumberField("Sincronizar a cada", c.sheetSyncMin, "min") { cfg { copy(sheetSyncMin = it) } }
+    }
+    Panel("O que usar da planilha") {
+        SwitchRow("Respostas", c.sheetRulesOn, "Aba Respostas: A palavras, B resposta, C comparação, D quem, E ativo") { cfg { copy(sheetRulesOn = it) } }
+        Divider()
+        SwitchRow("Gravar histórico", c.sheetLogOn, "Cada resposta vira uma linha na aba Historico") { cfg { copy(sheetLogOn = it) } }
+        Hint("A aba Consulta é usada pelas regras de consulta, e a aba Pedidos pela função Pedido pela conversa.")
+    }
+    Panel {
+        Advanced("Como conectar") {
+            Hint(
+                "1. Na planilha, abra Extensões > Apps Script.\n" +
+                    "2. Cole o código do arquivo apps-script/Codigo.gs do projeto e troque a CHAVE.\n" +
+                    "3. Rode a função criarAbas uma vez.\n" +
+                    "4. Implantar > Nova implantação > App da Web. Executar como você, acesso: qualquer pessoa.\n" +
+                    "5. Cole aqui o link e a chave e toque em Sincronizar agora.",
+            )
+        }
+    }
+}
+
+// ---------- Histórico ----------
+
+@Composable
+private fun HistoryItem(e: app.zapresponde.HistoryEntry) {
+    Column(Modifier.padding(vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(e.chat, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(fmt(e.time), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(e.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Box(
+            Modifier.padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) { Text(e.reply, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 4, overflow = TextOverflow.Ellipsis) }
+        Text(e.rule, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+fun HistoryScreen() {
+    val h = Store.history
+    Hint("${h.size} respostas guardadas · ${h.count { System.currentTimeMillis() - it.time < 86_400_000 }} nas últimas 24h")
+    Panel {
+        if (h.isEmpty()) Hint("Nenhuma resposta enviada ainda.")
+        h.take(100).forEachIndexed { i, e ->
+            if (i > 0) Divider()
+            HistoryItem(e)
+        }
+    }
+}
+
+// ---------- Ajustes ----------
+
+@Composable
+fun MoreTab(open: (String) -> Unit) {
+    val c = Store.config
+    Panel("Respostas") {
+        FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
+        Divider()
+        FeatureRow(Icons.Default.ShoppingCart, "Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { open("form") }
+        Divider()
+        FeatureRow(Icons.Default.Edit, "Cabeçalho e rodapé", "Texto fixo antes e depois das respostas", c.headerFooterOn, { on -> cfg { copy(headerFooterOn = on) } }) { open("header") }
+    }
+    Panel("Comportamento") {
+        FeatureRow(Icons.Default.Refresh, "Atraso humano", "Espera de ${c.delayMinSec} a ${c.delayMaxSec} segundos", c.delayOn, { on -> cfg { copy(delayOn = on) } }) { open("delay") }
+        Divider()
+        FeatureRow(Icons.Default.DateRange, "Agenda", "Só responde em ${c.scheduleHours}", c.scheduleOn, { on -> cfg { copy(scheduleOn = on) } }) { open("schedule") }
+        Divider()
+        FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você abrir a conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
+        Divider()
+        FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
+    }
+    Panel("Ferramentas") {
+        FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
+        Divider()
+        FeatureRow(Icons.Default.Info, "Não está funcionando?", "Verifique permissões e bateria", null) { open("help") }
+    }
 }
 
 @Composable
 fun WelcomeScreen() {
     val c = Store.config
-    Text("Boas-vindas", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar boas-vindas", c.welcomeOn) { cfg { copy(welcomeOn = it) } }
-    Field("Mensagem", c.welcomeText, 3) { cfg { copy(welcomeText = it) } }
-    SwitchRow("Enviar uma vez por dia", c.welcomeDaily, "Desligado: só na primeira vez que a pessoa fala com você") { cfg { copy(welcomeDaily = it) } }
-    Text("Se uma regra também servir, a resposta dela vai logo depois. $VARS", style = MaterialTheme.typography.bodySmall)
+    Panel { SwitchRow("Ativar boas-vindas", c.welcomeOn) { cfg { copy(welcomeOn = it) } } }
+    Panel("Mensagem") {
+        Field("Texto", c.welcomeText, 3) { cfg { copy(welcomeText = it) } }
+        Hint(VARS)
+    }
+    Panel("Quando enviar") {
+        SwitchRow("Uma vez por dia", c.welcomeDaily, "Desligado: só na primeira vez que a pessoa fala com você") { cfg { copy(welcomeDaily = it) } }
+        Hint("Se uma regra também servir, a resposta dela vai logo depois.")
+    }
 }
 
 @Composable
 fun FormScreen() {
     val c = Store.config
-    Text("Pedido pela conversa", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar pedido", c.formOn) { cfg { copy(formOn = it) } }
-    Field("Palavras que iniciam o pedido", c.formTrigger) { cfg { copy(formTrigger = it) } }
-    Field("Perguntas (uma por linha)", c.formQuestions, 5) { cfg { copy(formQuestions = it) } }
-    Field("Mensagem final", c.formDone, 2) { cfg { copy(formDone = it) } }
-    Field("Palavra para cancelar", c.formCancel) { cfg { copy(formCancel = it) } }
-    Text("As respostas vão para a aba Pedidos da planilha (Google Sheets precisa estar ligado).", style = MaterialTheme.typography.bodySmall)
+    Panel { SwitchRow("Ativar pedido pela conversa", c.formOn) { cfg { copy(formOn = it) } } }
+    Panel("Como funciona") {
+        Field("Palavras que iniciam o pedido", c.formTrigger, help = "Separe por vírgula") { cfg { copy(formTrigger = it) } }
+        Field("Perguntas, uma por linha", c.formQuestions, 5) { cfg { copy(formQuestions = it) } }
+        Field("Mensagem final", c.formDone, 2) { cfg { copy(formDone = it) } }
+        Field("Palavra para cancelar", c.formCancel) { cfg { copy(formCancel = it) } }
+        Hint("As respostas vão para a aba Pedidos (a planilha precisa estar ligada).")
+    }
 }
 
 @Composable
 fun DelayScreen() {
     val c = Store.config
-    Text("Atraso humano", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar atraso", c.delayOn) { cfg { copy(delayOn = it) } }
-    NumberField("Mínimo (segundos)", c.delayMinSec) { cfg { copy(delayMinSec = it) } }
-    NumberField("Máximo (segundos)", c.delayMaxSec) { cfg { copy(delayMaxSec = it) } }
-    Text("Se a pessoa mandar outra mensagem durante a espera, a resposta pendente é trocada pela nova.", style = MaterialTheme.typography.bodySmall)
+    Panel { SwitchRow("Ativar atraso humano", c.delayOn) { cfg { copy(delayOn = it) } } }
+    Panel("Tempo de espera") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) { NumberField("Mínimo", c.delayMinSec, "s") { cfg { copy(delayMinSec = it) } } }
+            Box(Modifier.weight(1f)) { NumberField("Máximo", c.delayMaxSec, "s") { cfg { copy(delayMaxSec = it) } } }
+        }
+        Hint("O app sorteia um tempo entre os dois. Se a pessoa mandar outra mensagem durante a espera, a resposta é trocada pela nova.")
+    }
 }
 
 @Composable
 fun ScheduleScreen() {
     val c = Store.config
-    Text("Agenda", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar agenda", c.scheduleOn, "Fora desses horários o app não responde") { cfg { copy(scheduleOn = it) } }
-    Field("Horários", c.scheduleHours, help = "Ex.: 18:00-08:00 (atravessa a meia-noite) ou 08:00-12:00, 14:00-18:00") { cfg { copy(scheduleHours = it) } }
-    DaysPicker(c.scheduleDays) { cfg { copy(scheduleDays = it) } }
+    Panel { SwitchRow("Ativar agenda", c.scheduleOn, "Fora desses horários o app não responde") { cfg { copy(scheduleOn = it) } } }
+    Panel("Horários") {
+        Field("Horários", c.scheduleHours, help = "Ex.: 18:00-08:00 ou 08:00-12:00, 14:00-18:00") { cfg { copy(scheduleHours = it) } }
+        DaysPicker(c.scheduleDays) { cfg { copy(scheduleDays = it) } }
+    }
 }
 
 @Composable
 fun HeaderScreen() {
     val c = Store.config
-    Text("Cabeçalho e rodapé", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar cabeçalho e rodapé", c.headerFooterOn) { cfg { copy(headerFooterOn = it) } }
-    Field("Cabeçalho", c.header, 2) { cfg { copy(header = it) } }
-    Field("Rodapé", c.footer, 2) { cfg { copy(footer = it) } }
+    Panel { SwitchRow("Ativar cabeçalho e rodapé", c.headerFooterOn) { cfg { copy(headerFooterOn = it) } } }
+    Panel("Textos") {
+        Field("Cabeçalho", c.header, 2) { cfg { copy(header = it) } }
+        Field("Rodapé", c.footer, 2) { cfg { copy(footer = it) } }
+    }
 }
 
 @Composable
 fun TakeoverScreen() {
     val c = Store.config
-    Text("Pausa quando você assume", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar pausa", c.takeoverOn) { cfg { copy(takeoverOn = it) } }
-    NumberField("Minutos de pausa", c.takeoverMin) { cfg { copy(takeoverMin = it) } }
-    Text("Quando você toca na notificação ou abre a conversa no WhatsApp, o robô para de responder naquela conversa.", style = MaterialTheme.typography.bodySmall)
+    Panel { SwitchRow("Ativar pausa", c.takeoverOn) { cfg { copy(takeoverOn = it) } } }
+    Panel("Duração") {
+        NumberField("Tempo de pausa", c.takeoverMin, "min") { cfg { copy(takeoverMin = it) } }
+        Hint("Quando você toca na notificação ou abre a conversa no WhatsApp, o robô para de responder naquela conversa.")
+    }
     var tick by remember { mutableStateOf(0) }
-    val paused = Store.state.chats.filter { tick >= 0 }.filter { it.value.pauseUntil > System.currentTimeMillis() }
-    if (paused.isNotEmpty()) {
-        Section("Conversas pausadas agora")
+    val paused = Store.state.chats.filter { tick >= 0 && it.value.pauseUntil > System.currentTimeMillis() }
+    if (paused.isNotEmpty()) Panel("Pausadas agora") {
         paused.forEach { (chat, st) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("$chat até ${fmt(st.pauseUntil)}", Modifier.weight(1f))
+                Text("$chat · até ${fmt(st.pauseUntil)}", Modifier.weight(1f))
                 TextButton({ Store.pauseChat(chat, 0); tick++ }) { Text("Retomar") }
             }
         }
@@ -326,9 +658,8 @@ fun TakeoverScreen() {
 @Composable
 fun LoopScreen() {
     val c = Store.config
-    Text("Proteção contra loop", style = MaterialTheme.typography.headlineSmall)
-    SwitchRow("Ativar proteção", c.loopGuardOn) { cfg { copy(loopGuardOn = it) } }
-    Text("Se o app responder 5 vezes à mesma conversa em 2 minutos, ela fica pausada por 30 minutos.", style = MaterialTheme.typography.bodySmall)
+    Panel { SwitchRow("Ativar proteção contra loop", c.loopGuardOn) { cfg { copy(loopGuardOn = it) } } }
+    Panel { Hint("Se o app responder 5 vezes à mesma conversa em 2 minutos, ela fica pausada por 30 minutos.") }
 }
 
 @Composable
@@ -336,35 +667,34 @@ fun TestScreen() {
     var name by remember { mutableStateOf("Maria Silva") }
     var text by remember { mutableStateOf("Oi, bom dia") }
     var group by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf("") }
-    Text("Testar", style = MaterialTheme.typography.headlineSmall)
-    Text("Simula uma mensagem sem enviar nada. Ignora o botão liga/desliga.", style = MaterialTheme.typography.bodySmall)
-    Field("Nome de quem manda", name) { name = it }
-    Field("Grupo (vazio = conversa individual)", group) { group = it }
-    Field("Mensagem", text, 2) { text = it }
-    Button({
-        val msg = Incoming(group.ifBlank { name }, name, text, group.isNotBlank())
-        val d = Engine.decide(
-            msg, LocalDateTime.now(), System.currentTimeMillis(), Store.config.copy(enabled = true),
-            Store.allRules(), Store.sheet.consulta, Store.stateCopy(),
-        )
-        result = if (d.replies.isEmpty()) "Sem resposta: ${d.reason}"
-        else "Regra: ${d.rule}\nAtraso: ${d.delayMs / 1000}s\n\n" + d.replies.joinToString("\n\n")
-    }) { Text("Testar") }
-    if (result.isNotEmpty()) Card(Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(result, Modifier.padding(12.dp)) }
-}
-
-@Composable
-fun HistoryScreen() {
-    Text("Histórico", style = MaterialTheme.typography.headlineSmall)
-    val h = Store.history
-    val today = h.count { it.time > System.currentTimeMillis() - 86_400_000 }
-    Text("${h.size} respostas guardadas · $today nas últimas 24h")
-    h.take(100).forEach { e ->
-        HorizontalDivider(Modifier.padding(vertical = 6.dp))
-        Text("${fmt(e.time)} · ${e.chat} · ${e.rule}", style = MaterialTheme.typography.bodySmall)
-        Text("← ${e.text}")
-        Text("→ ${e.reply}")
+    var result by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
+    Panel("Mensagem simulada") {
+        Field("Nome de quem manda", name) { name = it }
+        Field("Grupo", group, help = "Vazio = conversa individual") { group = it }
+        Field("Mensagem", text, 2) { text = it }
+        Button({
+            val msg = Incoming(group.ifBlank { name }, name, text, group.isNotBlank())
+            val d = Engine.decide(
+                msg, LocalDateTime.now(), System.currentTimeMillis(), Store.config.copy(enabled = true),
+                Store.allRules(), Store.sheet.consulta, Store.stateCopy(),
+            )
+            result = if (d.replies.isEmpty()) "Sem resposta: ${d.reason}" to emptyList()
+            else "${d.rule} · espera de ${d.delayMs / 1000}s" to d.replies
+        }, Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Testar")
+        }
+        Hint("Não envia nada e ignora o botão ON/OFF.")
+    }
+    result?.let { (title, replies) ->
+        Panel("Resultado") {
+            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
+            replies.forEach {
+                Box(
+                    Modifier.padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(12.dp),
+                ) { Text(it, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+            }
+        }
     }
 }
 
@@ -372,38 +702,46 @@ fun HistoryScreen() {
 fun HelpScreen() {
     val ctx = LocalContext.current
     val access = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-    val battery = (ctx.getSystemService(PowerManager::class.java)).isIgnoringBatteryOptimizations(ctx.packageName)
+    val battery = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
     val notifs = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-    Text("Não está funcionando?", style = MaterialTheme.typography.headlineSmall)
-    Check("Acesso às notificações", access) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-    Check("Sem economia de bateria para o app", battery) {
-        ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))
+    Panel("Verificações") {
+        Check("Acesso às notificações", access) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        Divider()
+        Check("Sem economia de bateria", battery) {
+            ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))
+        }
+        Divider()
+        Check("Notificações do ZapResponde", notifs) {
+            ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
+        }
+        Divider()
+        Check("Respostas automáticas ligadas", Store.config.enabled) { cfg { copy(enabled = true) } }
     }
-    Check("Notificações do ZapResponde", notifs) {
-        ctx.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName))
-    }
-    Check("Respostas automáticas ligadas", Store.config.enabled) { cfg { copy(enabled = true) } }
-    OutlinedButton({
-        ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
-    }, Modifier.padding(top = 8.dp)) { Text("Abrir notificações do WhatsApp") }
-    OutlinedButton({
+    Panel("Ações") {
+        FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp", "Precisam estar ligadas para o app responder", null) {
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
+        }
+        Divider()
         // Re-binding the listener fixes the common "stopped replying" case after updates.
-        val cn = ComponentName(ctx, ReplyService::class.java)
-        android.service.notification.NotificationListenerService.requestRebind(cn)
-    }) { Text("Reiniciar o serviço de respostas") }
-    Text(
-        "• O app só responde quando aparece notificação. Com a conversa aberta ou silenciada, não responde.\n" +
-            "• Xiaomi, Samsung e Motorola: libere \"início automático\" e tire o app da economia de bateria.\n" +
-            "• Android 15+: se aparecer aviso de notificação sensível, permita o acesso nas configurações de notificação.\n" +
-            "• Se nada resolver, desligue e ligue o acesso às notificações ou reinicie o celular.",
-        Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodySmall,
-    )
+        FeatureRow(Icons.Default.Refresh, "Reiniciar o serviço de respostas", "Resolve quando o app para de responder", null) {
+            NotificationListenerService.requestRebind(ComponentName(ctx, ReplyService::class.java))
+        }
+    }
+    Panel("Dicas") {
+        Hint(
+            "• O app só responde quando aparece notificação. Com a conversa aberta ou silenciada, não responde.\n" +
+                "• Xiaomi, Samsung e Motorola: libere \"início automático\" e tire o app da economia de bateria.\n" +
+                "• Android 15+: se aparecer aviso de notificação sensível, permita o acesso nas configurações.\n" +
+                "• Se nada resolver, desligue e ligue o acesso às notificações ou reinicie o celular.",
+        )
+    }
 }
 
 @Composable
 private fun Check(label: String, ok: Boolean, fix: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text((if (ok) "✓ " else "✗ ") + label, Modifier.weight(1f), color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconBubble(if (ok) Icons.Default.CheckCircle else Icons.Default.Warning, if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, 32)
+        Text(label, Modifier.weight(1f).padding(horizontal = 12.dp))
         if (!ok) TextButton(fix) { Text("Corrigir") }
     }
 }
