@@ -1,9 +1,9 @@
-// ZapResponde - script da planilha, versão 0.9.2
+// ZapResponde - script da planilha, versão 0.9.3
 // ZapResponde: cole este código em Extensões > Apps Script da sua planilha e salve.
 // Depois: Implantar > Nova implantação > App da Web (executar como "Eu", acesso "Qualquer pessoa").
 // Por fim, recarregue a planilha e use o menu ZapResponde > Conectar celular. Não precisa editar nada aqui.
 
-const VERSAO = '0.9.2'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
+const VERSAO = '0.9.3'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
 
 function chave() {
   const props = PropertiesService.getScriptProperties();
@@ -105,9 +105,13 @@ function doGet(e) {
   return saida(r);
 }
 
+// Abas que o app pode gravar; qualquer outro nome é recusado.
+const ABAS_APP = ['Historico', 'Pedidos', 'Leads', 'Backup'];
+
 function doPost(e) {
   const b = JSON.parse(e.postData.contents);
   if (b.key !== chave()) return saida({ error: 'chave incorreta' });
+  if (ABAS_APP.indexOf(b.sheet) < 0) return saida({ error: 'aba não permitida' });
   const trava = LockService.getScriptLock();
   trava.waitLock(20000);
   try {
@@ -124,7 +128,8 @@ function doPost(e) {
       // Mais novas no topo: entram logo abaixo do cabeçalho, a última recebida primeiro.
       const cheias = linhas.map(function (l) { while (l.length < largura) l.push(''); return l; }).reverse();
       aba.insertRowsAfter(1, cheias.length);
-      aba.getRange(2, 1, cheias.length, largura).setValues(cheias).setFontWeight('normal').setBackground(null);
+      // Texto puro: mensagens de contatos que começam com "=", "+" ou "-" não viram fórmula.
+      aba.getRange(2, 1, cheias.length, largura).setNumberFormat('@').setValues(cheias).setFontWeight('normal').setBackground(null);
     }
     return saida({ ok: true, linhas: linhas.length });
   } finally {
