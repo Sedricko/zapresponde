@@ -110,10 +110,10 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             }
             Store.sent(box.historico.size, box.pedidos.size)
             val (respostas, consulta) = Sheets.read(cfg)
-            Store.setSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
+            Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
             Result.success()
         } catch (e: Exception) {
-            Store.setSheet(Store.sheet.copy(error = e.message ?: e.toString()))
+            Store.updateSheet(Store.sheet.copy(error = e.message ?: e.toString()))
             Result.retry()
         }
     }

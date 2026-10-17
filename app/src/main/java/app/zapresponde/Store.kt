@@ -68,7 +68,7 @@ object Store {
     }
 
     @Synchronized
-    fun setConfig(c: Config) {
+    fun updateConfig(c: Config) {
         // Turning auto-reply on starts a fresh round: "reply once" counters reset.
         if (c.enabled && !config.enabled) {
             state.chats.values.forEach { it.rules.clear() }
@@ -78,10 +78,10 @@ object Store {
     }
 
     @Synchronized
-    fun setRules(r: List<Rule>) { rules = r; save("rules.json", r) }
+    fun updateRules(r: List<Rule>) { rules = r; save("rules.json", r) }
 
     @Synchronized
-    fun setSheet(s: SheetCache) { sheet = s; save("sheet.json", s) }
+    fun updateSheet(s: SheetCache) { sheet = s; save("sheet.json", s) }
 
     @Synchronized
     fun saveState() = save("state.json", state)

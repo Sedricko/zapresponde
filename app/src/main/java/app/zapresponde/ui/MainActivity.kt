@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun cfg(f: Config.() -> Config) = Store.setConfig(Store.config.f())
+private fun cfg(f: Config.() -> Config) = Store.updateConfig(Store.config.f())
 
 @Composable
 fun App() {
@@ -149,17 +149,17 @@ fun RulesScreen(edit: (String) -> Unit) {
         Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Column(Modifier.padding(12.dp)) {
                 SwitchRow(r.name, r.enabled, "${r.match.label}: ${r.keywords.take(40)}") { on ->
-                    Store.setRules(rules.map { if (it.id == r.id) it.copy(enabled = on) else it })
+                    Store.updateRules(rules.map { if (it.id == r.id) it.copy(enabled = on) else it })
                 }
                 Row {
                     TextButton({ edit(r.id) }) { Text("Configurar") }
-                    TextButton({ if (i > 0) Store.setRules(rules.toMutableList().apply { add(i - 1, removeAt(i)) }) }) { Text("↑") }
-                    TextButton({ if (i < rules.lastIndex) Store.setRules(rules.toMutableList().apply { add(i + 1, removeAt(i)) }) }) { Text("↓") }
+                    TextButton({ if (i > 0) Store.updateRules(rules.toMutableList().apply { add(i - 1, removeAt(i)) }) }) { Text("↑") }
+                    TextButton({ if (i < rules.lastIndex) Store.updateRules(rules.toMutableList().apply { add(i + 1, removeAt(i)) }) }) { Text("↓") }
                 }
             }
         }
     }
-    Button({ val r = Rule(); Store.setRules(rules + r); edit(r.id) }, Modifier.fillMaxWidth()) { Text("+ Nova regra") }
+    Button({ val r = Rule(); Store.updateRules(rules + r); edit(r.id) }, Modifier.fillMaxWidth()) { Text("+ Nova regra") }
     if (Store.config.sheetOn && Store.sheet.rules.isNotEmpty()) {
         Section("Da planilha (edite na aba Respostas)")
         Store.sheet.rules.forEach { Text("• ${it.keywords.ifBlank { "(qualquer)" }} → ${it.replies.first().take(50)}") }
@@ -170,7 +170,7 @@ fun RulesScreen(edit: (String) -> Unit) {
 fun RuleEdit(id: String, done: () -> Unit) {
     val rules = Store.rules
     val r = rules.firstOrNull { it.id == id } ?: return
-    fun set(f: Rule.() -> Rule) = Store.setRules(rules.map { if (it.id == id) it.f() else it })
+    fun set(f: Rule.() -> Rule) = Store.updateRules(rules.map { if (it.id == id) it.f() else it })
     Field("Nome da regra", r.name) { set { copy(name = it) } }
     SwitchRow("Regra ativa", r.enabled) { set { copy(enabled = it) } }
     Choice("Tipo", r.kind, Kind.entries, { it.label }) { set { copy(kind = it) } }
@@ -223,7 +223,7 @@ fun RuleEdit(id: String, done: () -> Unit) {
     DaysPicker(r.days) { set { copy(days = it) } }
 
     Spacer(Modifier.height(16.dp))
-    OutlinedButton({ Store.setRules(rules.filter { it.id != id }); done() }) { Text("Apagar regra") }
+    OutlinedButton({ Store.updateRules(rules.filter { it.id != id }); done() }) { Text("Apagar regra") }
 }
 
 const val VARS = "Variáveis: {nome} {primeiro_nome} {mensagem} {data} {hora} {dia_semana} {saudacao} {grupo} {contador}"
