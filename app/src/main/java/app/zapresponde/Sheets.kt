@@ -74,6 +74,12 @@ object Sheets {
         parse(body)
     }
 
+    /** Newest backup saved in the sheet's Backup tab, or null if there is none. */
+    fun readBackup(cfg: Config): String? {
+        val url = cfg.sheetUrl.trim() + "?backup=1&key=" + URLEncoder.encode(cfg.sheetKey, "UTF-8")
+        return parse(readBody(open(url)))["Backup"]?.jsonPrimitive?.content?.ifBlank { null }
+    }
+
     fun refresh(cfg: Config) {
         val (respostas, consulta) = read(cfg)
         Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
@@ -114,7 +120,14 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 val qs = cfg.formQuestions.lines().map { it.trim() }.filter { it.isNotEmpty() }
                 Sheets.append(cfg, "Pedidos", listOf("Data", "Conversa") + qs, box.pedidos)
             }
-            Store.sent(box.historico.size, box.pedidos.size)
+            if (box.leads.isNotEmpty()) Sheets.append(cfg, "Leads", listOf("Data", "Motorista", "Rota", "Carga", "Status"), box.leads)
+            Store.sent(box.historico.size, box.pedidos.size, box.leads.size)
+            val now = System.currentTimeMillis()
+            if (cfg.backupAutoOn && now - Store.state.lastBackup > 24 * 3_600_000L) {
+                val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date(now))
+                Sheets.append(cfg, "Backup", listOf("Data", "Backup"), listOf(listOf(date, Store.exportBackup())))
+                Store.state.lastBackup = now; Store.saveState()
+            }
             Sheets.refresh(cfg)
             Result.success()
         } catch (e: Exception) {

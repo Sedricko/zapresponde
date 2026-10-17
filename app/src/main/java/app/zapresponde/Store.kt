@@ -25,7 +25,11 @@ data class SheetCache(
 
 /** Rows waiting to be appended to a tab, kept on disk so nothing is lost without internet. */
 @Serializable
-data class Outbox(val historico: List<List<String>> = emptyList(), val pedidos: List<List<String>> = emptyList())
+data class Outbox(
+    val historico: List<List<String>> = emptyList(),
+    val pedidos: List<List<String>> = emptyList(),
+    val leads: List<List<String>> = emptyList(),
+)
 
 /** What "Exportar backup" writes: all settings and the app's own rules (sheet rules live in the sheet). */
 @Serializable
@@ -108,18 +112,19 @@ object Store {
     }
 
     @Synchronized
-    fun queue(historico: List<String>? = null, pedido: List<String>? = null) {
+    fun queue(historico: List<String>? = null, pedido: List<String>? = null, lead: List<String>? = null) {
         outbox = Outbox(
             outbox.historico + listOfNotNull(historico),
             outbox.pedidos + listOfNotNull(pedido),
+            outbox.leads + listOfNotNull(lead),
         )
         save("outbox.json", outbox)
     }
 
     /** Removes the rows that were just uploaded, keeping anything queued meanwhile. */
     @Synchronized
-    fun sent(historico: Int, pedidos: Int) {
-        outbox = Outbox(outbox.historico.drop(historico), outbox.pedidos.drop(pedidos))
+    fun sent(historico: Int, pedidos: Int, leads: Int) {
+        outbox = Outbox(outbox.historico.drop(historico), outbox.pedidos.drop(pedidos), outbox.leads.drop(leads))
         save("outbox.json", outbox)
     }
 

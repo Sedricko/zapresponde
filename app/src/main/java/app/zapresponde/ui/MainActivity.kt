@@ -163,7 +163,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Não está funcionando?",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -199,6 +199,7 @@ fun App() {
                     "loop" -> LoopScreen()
                     "contacts" -> ContactsScreen()
                     "backup" -> BackupScreen()
+                    "approval" -> ApprovalScreen()
                     "frete" -> FreteScreen()
                     "test" -> TestScreen()
                     "help" -> HelpScreen()
@@ -622,6 +623,12 @@ fun MoreTab(open: (String) -> Unit) {
     Panel("Respostas") {
         FeatureRow(Icons.Default.Search, "Fretes FreteBras", "Responde o motorista com a carga da rota", c.freteOn, { on -> cfg { copy(freteOn = on) } }) { open("frete") }
         Divider()
+        FeatureRow(Icons.AutoMirrored.Filled.List, "Aba Leads", "Grava cada motorista que pediu carga", c.leadsOn, { on -> cfg { copy(leadsOn = on) } }) { open("frete") }
+        Divider()
+        FeatureRow(Icons.Default.Notifications, "Alerta de carga pedida", "Avisa no celular quando a carga está disponível", c.alertOn, { on -> cfg { copy(alertOn = on) } }) { open("frete") }
+        Divider()
+        FeatureRow(Icons.Default.CheckCircle, "Modo aprovação", "Você confirma antes de enviar", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
+        Divider()
         FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
         Divider()
         FeatureRow(Icons.Default.ShoppingCart, "Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { open("form") }
@@ -849,9 +856,37 @@ fun BackupScreen() {
         }
         if (msg.isNotEmpty()) Hint(msg)
     }
+    val c = Store.config
+    val scope = rememberCoroutineScope()
+    Panel("Backup automático") {
+        SwitchRow("Backup diário na planilha", c.backupAutoOn, "Uma vez por dia, na aba Backup da planilha conectada") { cfg { copy(backupAutoOn = it) } }
+        OutlinedButton({
+            msg = "Buscando o backup na planilha..."
+            scope.launch {
+                msg = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val text = Sheets.readBackup(Store.config) ?: error("A planilha ainda não tem backup.")
+                        Store.importBackup(text)
+                        "Backup da planilha restaurado: configurações e ${Store.rules.size} regras."
+                    }.getOrElse { it.message ?: "Não consegui restaurar." }
+                }
+                Sheets.schedule(ctx)
+            }
+        }, Modifier.fillMaxWidth(), enabled = c.sheetUrl.isNotBlank()) { Text("Restaurar o backup da planilha") }
+    }
     Panel {
         Hint("O arquivo leva todas as configurações (inclusive o link e a chave da planilha) e as regras do app. Guarde no Google Drive ou mande para você mesmo. Importar substitui as configurações e regras atuais. O histórico não vai no backup.")
     }
+}
+
+@Composable
+fun ApprovalScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Ativar modo aprovação", c.approvalOn) { cfg { copy(approvalOn = it) } }
+        Field("Conversas que precisam de aprovação", c.approvalList, lines = 3, help = "Um nome por linha. Vazio = todas as conversas.") { cfg { copy(approvalList = it) } }
+    }
+    Panel { Hint("O robô prepara a resposta e mostra uma notificação com \"Enviar\" e \"Descartar\". Nada é enviado sem o seu toque.") }
 }
 
 @Composable
@@ -859,6 +894,10 @@ fun FreteScreen() {
     val c = Store.config
     Panel {
         SwitchRow("Ativar respostas de fretes", c.freteOn) { cfg { copy(freteOn = it) } }
+        Divider()
+        SwitchRow("Gravar na aba Leads", c.leadsOn, "Data, motorista, rota, carga e se estava disponível") { cfg { copy(leadsOn = it) } }
+        SwitchRow("Alerta de carga pedida", c.alertOn, "Notificação no celular quando a carga pedida está disponível; tocar abre a conversa") { cfg { copy(alertOn = it) } }
+        Divider()
         Field("Quando a carga não estiver na planilha", c.freteNotFound, lines = 5, help = "Deixe vazio para não responder.") { cfg { copy(freteNotFound = it) } }
     }
     Panel {

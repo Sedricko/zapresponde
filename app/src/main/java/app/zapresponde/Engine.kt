@@ -71,8 +71,13 @@ object Engine {
         }
 
         // Before the welcome: a FreteBras driver is a new contact, and should get only the freight answer.
-        if (cfg.freteOn) frete(msg.text, consulta, cfg.freteNotFound)?.let {
-            return finish(msg, now, cfg, cs, nowMs, listOf(it), "Fretes", null, random)
+        if (cfg.freteOn) freteRoute(msg.text)?.let { route ->
+            val found = freteMessage(route, consulta)
+            val reply = found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
+            return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes", null, random).copy(
+                leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(), if (found != null) "disponível" else "indisponível"),
+                alert = if (found != null) "${msg.sender} quer a carga ${route.label}" else null,
+            )
         }
 
         if (cfg.welcomeOn) {
@@ -210,7 +215,11 @@ object Engine {
         }
     }
 
-    data class Route(val from: String, val to: String, val cargo: String = "")
+    /** [from]/[to] are comparison keys ("pontagrossapr"); [label] is for people ("PONTA GROSSA/PR → RIO DE JANEIRO/RJ"). */
+    data class Route(val from: String, val to: String, val cargo: String = "", val label: String = "")
+
+    private fun label(c1: String, u1: String, c2: String, u2: String) =
+        "${c1.replace('-', ' ').trim()}/$u1 → ${c2.replace('-', ' ').trim()}/$u2".uppercase()
 
     private fun place(city: String, uf: String) = normalize(city).replace(Regex("[^a-z0-9]"), "") + normalize(uf)
 
@@ -219,11 +228,11 @@ object Engine {
         val t = normalize(text)
         Regex("""frete de ([^/\n]+)/([a-z]{2}) para ([^/\n]+)/([a-z]{2})(?: de ([a-z]+))?""").find(t)?.let { m ->
             val g = m.groupValues
-            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5])
+            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5], label(g[1], g[2], g[3], g[4]))
         }
         Regex("""fretebras\.com\.br/frete/.*?carga-de-([a-z0-9-]+?)-([a-z]{2})-para-([a-z0-9-]+?)-([a-z]{2})/(?:.*?/carga-([a-z]+))?""").find(t)?.let { m ->
             val g = m.groupValues
-            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5])
+            return Route(place(g[1], g[2]), place(g[3], g[4]), g[5], label(g[1], g[2], g[3], g[4]))
         }
         return null
     }
@@ -246,11 +255,14 @@ object Engine {
      * (its longest cell after column A), preferring one with the same cargo type; no match → [notFound] (blank = stay silent).
      * Null when the message is not a FreteBras one.
      */
-    fun frete(text: String, rows: List<List<String>>, notFound: String): String? {
-        val r = freteRoute(text) ?: return null
+    fun frete(text: String, rows: List<List<String>>, notFound: String): String? =
+        freteRoute(text)?.let { freteMessage(it, rows) ?: notFound.ifBlank { null } }
+
+    /** Ready message of the sheet row for this route, or null when the route is not in the sheet. */
+    fun freteMessage(r: Route, rows: List<List<String>>): String? {
         val hits = rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }
         val best = hits.firstOrNull { r.cargo.isNotEmpty() && hasWord(normalize(it.joinToString(" ")), r.cargo) } ?: hits.firstOrNull()
-        return best?.let { row -> (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim() } ?: notFound.ifBlank { null }
+        return best?.let { row -> (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim() }
     }
 
     private fun col(letter: String) = (letter.trim().uppercase().firstOrNull() ?: 'A') - 'A'

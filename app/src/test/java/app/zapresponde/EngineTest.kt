@@ -136,7 +136,7 @@ class EngineTest {
         val soLink = "Frete: https://www.fretebras.com.br/frete/transportes-poloni/carga-de-ponta-grossa-pr-para-rio-de-janeiro-rj/veiculo-carreta/especie-pallet/carga-bebida/1753372597044/"
         assertTrue(Engine.frete(soLink, sheet, "x")!!.contains("31 Ton"))
         val negociar = "Olá, vi seu frete na FreteBras, e tenho interesse em negociar.\nPágina do frete: https://www.fretebras.com.br/frete/transportes-poloni/carga-de-serra-es-para-salvador-ba/veiculo-carreta/especie-outro/carga-alimenticio/1758154495548"
-        assertEquals(Engine.Route("serraes", "salvadorba", "alimenticio"), Engine.freteRoute(negociar))
+        assertEquals(Engine.Route("serraes", "salvadorba", "alimenticio", "SERRA/ES → SALVADOR/BA"), Engine.freteRoute(negociar))
         assertTrue(Engine.frete(negociar, sheet + listOf(listOf("Serra/ES para Salvador/BA", "carga serra")), "x") == "carga serra")
         val fechada = "estou disponível para carregar seu frete de Cristalina/GO para Cariacica/ES de ALIMENTICIO."
         assertEquals("x", Engine.frete(fechada, sheet, "x"))
@@ -144,6 +144,10 @@ class EngineTest {
         assertEquals(null, Engine.frete("oi, bom dia", sheet, "x"))
         val rule = Rule(match = Match.ALL, replies = listOf("regra"))
         assertEquals(listOf("x"), run(msg(fechada), listOf(rule), on.copy(freteOn = true, freteNotFound = "x"), consulta = sheet).replies)
+        val d = run(msg(msgPg), listOf(rule), on.copy(freteOn = true), consulta = sheet)
+        assertEquals(listOf("Maria Silva", "PONTA GROSSA/PR → RIO DE JANEIRO/RJ", "BEBIDA", "disponível"), d.leadRow)
+        assertEquals("Maria Silva quer a carga PONTA GROSSA/PR → RIO DE JANEIRO/RJ", d.alert)
+        assertEquals(null, run(msg(fechada), listOf(rule), on.copy(freteOn = true), consulta = sheet).alert)
         assertEquals(listOf("regra"), run(msg(fechada), listOf(rule), consulta = sheet).replies)
     }
 

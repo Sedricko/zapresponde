@@ -22,12 +22,18 @@ class ReplyService : NotificationListenerService() {
     private val pending = HashMap<String, Job>()
     private val seen = ArrayDeque<String>()
 
+    private class Approval(val msg: Incoming, val action: Notification.Action, val pkg: String, val decision: Decision)
+    private val approvals = HashMap<Int, Approval>()
+    private var nextId = 1
+
     override fun onCreate() {
         super.onCreate()
         Store.init(this)
+        instance = this
     }
 
     override fun onDestroy() {
+        instance = null
         scope.cancel()
         super.onDestroy()
     }
@@ -72,7 +78,28 @@ class ReplyService : NotificationListenerService() {
         }
         Log.d(TAG, "${msg.chat}: ${d.reason}")
         if (d.replies.isEmpty()) return
+        val open = sbn.notification.contentIntent
+        if (cfg.alertOn) d.alert?.let { Alerts.show(this, "Carga pedida", it, open) }
 
+        val list = cfg.approvalList.lines().map { Engine.normalize(it) }.filter { it.isNotEmpty() }
+        if (cfg.approvalOn && (list.isEmpty() || Engine.normalize(msg.chat) in list)) {
+            val id = nextId++
+            approvals[id] = Approval(msg, action, sbn.packageName, d)
+            Alerts.approval(this, id, msg.chat, d.replies.joinToString("\n---\n"), open)
+            return
+        }
+        deliver(msg, action, sbn.packageName, d)
+    }
+
+    /** "Enviar" or "Descartar" tapped on an approval notification. */
+    fun approve(id: Int, send: Boolean) {
+        val a = approvals.remove(id) ?: return
+        Alerts.cancel(this, id)
+        if (send) deliver(a.msg, a.action, a.pkg, a.decision.copy(delayMs = 0))
+    }
+
+    private fun deliver(msg: Incoming, action: Notification.Action, pkg: String, d: Decision) {
+        val cfg = Store.config
         // A newer message from the same chat replaces a reply that is still waiting.
         pending.remove(msg.chat)?.cancel()
         pending[msg.chat] = scope.launch {
@@ -83,13 +110,15 @@ class ReplyService : NotificationListenerService() {
             }
             pending.remove(msg.chat)
             val entry = HistoryEntry(
-                System.currentTimeMillis(), APPS[sbn.packageName]!!, msg.chat, msg.isGroup,
+                System.currentTimeMillis(), APPS[pkg] ?: pkg, msg.chat, msg.isGroup,
                 msg.text, d.replies.joinToString("\n---\n"), d.rule,
             )
             Store.addHistory(entry)
+            val date = Sheets.historyRow(entry)[0]
             if (cfg.sheetOn && cfg.sheetLogOn) Store.queue(historico = Sheets.historyRow(entry))
-            d.formRow?.let { Store.queue(pedido = listOf(Sheets.historyRow(entry)[0]) + it) }
-            if (cfg.sheetOn && (cfg.sheetLogOn || d.formRow != null)) Sheets.syncNow(this@ReplyService)
+            d.formRow?.let { Store.queue(pedido = listOf(date) + it) }
+            val lead = d.leadRow?.takeIf { cfg.sheetOn && cfg.leadsOn }?.also { Store.queue(lead = listOf(date) + it) }
+            if (cfg.sheetOn && (cfg.sheetLogOn || d.formRow != null || lead != null)) Sheets.syncNow(this@ReplyService)
         }
     }
 
@@ -121,6 +150,8 @@ class ReplyService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "ZapResponde"
+        var instance: ReplyService? = null
+            private set
         val APPS = mapOf("com.whatsapp" to "WhatsApp", "com.whatsapp.w4b" to "WhatsApp Business")
 
         fun replyAction(n: Notification): Notification.Action? =

@@ -82,6 +82,12 @@ data class Config(
     val contactsList: String = "",
     val groupsOn: Boolean = true,
     val freteOn: Boolean = false,
+    val leadsOn: Boolean = false,
+    val alertOn: Boolean = false,
+    val backupAutoOn: Boolean = false,
+    val approvalOn: Boolean = false,
+    /** One name per line; empty = every chat waits for approval. */
+    val approvalList: String = "",
     val freteNotFound: String = "❌ *FRETE INDISPONÍVEL*\n\nEsta carga já foi fechada ou expirou. Confira novas oportunidades no grupo oficial:\n🔗 (cole aqui o link do grupo)",
     val sheetOn: Boolean = false,
     val sheetUrl: String = "",
@@ -106,7 +112,7 @@ class ChatState(
 )
 
 @Serializable
-class State(val chats: MutableMap<String, ChatState> = mutableMapOf())
+class State(val chats: MutableMap<String, ChatState> = mutableMapOf(), var lastBackup: Long = 0)
 
 /** Who the app answers, on top of each rule's own filter. */
 @Serializable
@@ -128,4 +134,8 @@ data class Decision(
     val delayMs: Long = 0,
     val formRow: List<String>? = null,
     val reason: String = "",
+    /** Motorista, rota, carga, status: one row for the Leads tab. */
+    val leadRow: List<String>? = null,
+    /** Text of the phone alert for an available load. */
+    val alert: String? = null,
 )
