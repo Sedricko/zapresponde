@@ -11,6 +11,7 @@ import kotlin.random.Random
 object Engine {
     private const val LOOP_WINDOW = 120_000L
     private const val LOOP_MAX = 5
+    private const val LOOKUP_MAX = 5
     private const val LOOP_PAUSE = 30 * 60_000L
 
     fun decide(
@@ -173,16 +174,22 @@ object Engine {
     /** Whole-word (or whole-phrase) match, so "oi" does not fire on "dois". Both sides already normalized. */
     fun hasWord(t: String, k: String) = k.isNotEmpty() && Regex("(^|\\W)" + Regex.escape(k) + "($|\\W)").containsMatchIn(t)
 
-    /** Finds the "Consulta" row whose search cell appears in the message; longest match wins. */
+    /**
+     * Finds the "Consulta" rows whose search cell appears in the message; the longest match wins, and
+     * every row tied with it is answered (e.g. all loads for one city), up to [LOOKUP_MAX].
+     * The template can use {busca}, {resultado} and any column by letter, like {C}.
+     */
     fun lookup(r: Rule, text: String, rows: List<List<String>>): String? {
         val t = normalize(text)
         val s = col(r.searchCol); val ret = col(r.returnCol)
-        val hit = rows.drop(1)
-            .filter { it.size > maxOf(s, ret) && it[s].isNotBlank() }
-            .filter { hasWord(t, normalize(it[s])) }
-            .maxByOrNull { it[s].length }
-        return if (hit == null) r.fallback.ifBlank { null }
-        else r.template.replace("{busca}", hit[s]).replace("{resultado}", hit[ret])
+        val hits = rows.drop(1)
+            .filter { it.size > maxOf(s, ret) && it[s].isNotBlank() && hasWord(t, normalize(it[s])) }
+        val best = hits.maxOfOrNull { it[s].trim().length } ?: return r.fallback.ifBlank { null }
+        return hits.filter { it[s].trim().length == best }.take(LOOKUP_MAX).joinToString("\n\n") { row ->
+            row.foldIndexed(r.template.replace("{busca}", row[s]).replace("{resultado}", row[ret])) { i, acc, v ->
+                if (i < 26) acc.replace("{${'A' + i}}", v) else acc
+            }
+        }
     }
 
     private fun col(letter: String) = (letter.trim().uppercase().firstOrNull() ?: 'A') - 'A'
@@ -272,13 +279,21 @@ object Engine {
             else -> Match.CONTAINS
         }
         val w = normalize(row.getOrElse(3) { "" })
+        val g = normalize(row.getOrElse(5) { "" })
         val active = normalize(row.getOrElse(4) { "sim" }).let { it.isEmpty() || it.startsWith("s") }
         val replies = reply.split("||").map { it.trim() }
         Rule(
             id = "sheet-${i + 2}", name = "Planilha linha ${i + 2}", enabled = active, match = match, keywords = keys,
             replies = replies, replyMode = if (replies.size > 1) ReplyMode.RANDOM else ReplyMode.SINGLE,
-            who = if (w.startsWith("grupo")) Who.NONE else Who.ALL,
-            groups = if (w.startsWith("grupo") || w.startsWith("todos")) Groups.ALL else Groups.NONE,
+            who = when {
+                w.startsWith("grupo") -> Who.NONE
+                w.startsWith("nao salv") -> Who.UNSAVED
+                w.startsWith("salv") -> Who.SAVED
+                else -> Who.ALL
+            },
+            // Column F "Grupos" (sim/não); older sheets without it used Quem = "grupos"/"todos".
+            groups = if (g.isNotEmpty()) (if (g.startsWith("s")) Groups.ALL else Groups.NONE)
+            else if (w.startsWith("grupo") || w.startsWith("todos")) Groups.ALL else Groups.NONE,
             fromSheet = true,
         )
     }

@@ -110,6 +110,9 @@ class EngineTest {
         assertEquals(listOf("Pedido 1234: entregue"), run(msg("status do pedido 1234"), listOf(r), consulta = rows).replies)
         assertEquals(listOf("Pedido 123: enviado"), run(msg("pedido 123?"), listOf(r), consulta = rows).replies)
         assertEquals(listOf("Não achei"), run(msg("pedido 999"), listOf(r), consulta = rows).replies)
+        val cargas = listOf(listOf("Destino", "Valor", "Peso"), listOf("Curitiba", "R$ 3.000", "12 t"), listOf("Curitiba", "R$ 2.500", "8 t"), listOf("Campinas", "R$ 900", "2 t"))
+        val c = r.copy(keywords = "carga", template = "{busca}: {B}, {C}")
+        assertEquals(listOf("Curitiba: R$ 3.000, 12 t\n\nCuritiba: R$ 2.500, 8 t"), run(msg("tem carga pra curitiba?"), listOf(c), consulta = cargas).replies)
     }
 
     @Test fun sheetRows() {
@@ -118,8 +121,11 @@ class EngineTest {
             listOf("oi, olá", "Oi! || Olá!", "contém", "todos", "sim"),
             listOf("horário", "8h às 18h", "exata", "", "não"),
             listOf("sem resposta", "", "", "", ""),
+            listOf("frete", "Temos!", "contém", "não salvos", "sim", "não"),
         ))
-        assertEquals(2, rules.size)
+        assertEquals(3, rules.size)
+        assertEquals(Who.UNSAVED, rules[2].who)
+        assertEquals(Groups.NONE, rules[2].groups)
         assertEquals(ReplyMode.RANDOM, rules[0].replyMode)
         assertEquals(Groups.ALL, rules[0].groups)
         assertEquals(Match.EXACT, rules[1].match)

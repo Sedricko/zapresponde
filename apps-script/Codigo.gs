@@ -15,6 +15,7 @@ function chave() {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('ZapResponde')
     .addItem('Conectar celular', 'conectar')
+    .addItem('Ligar planilha de cargas', 'ligarCargas')
     .addItem('Gerar nova chave', 'novaChave')
     .addToUi();
 }
@@ -56,13 +57,35 @@ function novaChave() {
   conectar();
 }
 
+// Faz a aba Consulta do app vir da primeira aba de outra planilha (ex.: Cargas disponíveis).
+function ligarCargas() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  const atual = props.getProperty('CARGAS') || '';
+  const r = ui.prompt('Planilha de cargas', 'Cole o link da planilha (a primeira aba será usada no lugar da aba Consulta).' +
+    (atual ? '\nAtual: ' + atual + '\nDeixe vazio para voltar a usar a aba Consulta.' : ''), ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  const link = r.getResponseText().trim();
+  if (!link) { props.deleteProperty('CARGAS'); ui.alert('Pronto: o app volta a usar a aba Consulta.'); return; }
+  let aba;
+  try { aba = SpreadsheetApp.openByUrl(link).getSheets()[0]; } catch (err) { ui.alert('Não consegui abrir esse link: ' + err.message); return; }
+  props.setProperty('CARGAS', link);
+  ui.alert('Ligado à aba "' + aba.getName() + '" (' + Math.max(aba.getLastRow() - 1, 0) + ' linhas). No app, crie uma regra de Consulta e escolha a coluna de busca (ex.: destino).');
+}
+
+function consulta(ss) {
+  const link = PropertiesService.getScriptProperties().getProperty('CARGAS');
+  return link ? SpreadsheetApp.openByUrl(link).getSheets()[0] : ss.getSheetByName('Consulta');
+}
+
 function doGet(e) {
   if (!e) throw new Error('doGet só funciona quando o app chama o link. Para conectar, escolha a função "conectar" e clique em Executar.');
   if (e.parameter.key !== chave()) return saida({ error: 'chave incorreta' });
   const ss = SpreadsheetApp.getActive();
   const r = {};
-  ['Respostas', 'Consulta'].forEach(function (nome) {
-    const aba = ss.getSheetByName(nome);
+  const abas = { Respostas: ss.getSheetByName('Respostas'), Consulta: consulta(ss) };
+  Object.keys(abas).forEach(function (nome) {
+    const aba = abas[nome];
     r[nome] = aba && aba.getLastRow() > 0 ? aba.getDataRange().getDisplayValues() : [];
   });
   return saida(r);
@@ -76,12 +99,18 @@ function doPost(e) {
   try {
     const ss = SpreadsheetApp.getActive();
     const aba = ss.getSheetByName(b.sheet) || ss.insertSheet(b.sheet);
-    if (aba.getLastRow() === 0 && b.header && b.header.length) aba.appendRow(b.header);
+    if (aba.getLastRow() === 0 && b.header && b.header.length) {
+      aba.appendRow(b.header);
+      aba.getRange(1, 1, 1, b.header.length).setFontWeight('bold').setBackground('#d3f5e3');
+    }
+    aba.setFrozenRows(1);
     const linhas = b.rows || [];
     if (linhas.length) {
       const largura = Math.max.apply(null, linhas.map(function (l) { return l.length; }));
-      const cheias = linhas.map(function (l) { while (l.length < largura) l.push(''); return l; });
-      aba.getRange(aba.getLastRow() + 1, 1, cheias.length, largura).setValues(cheias);
+      // Mais novas no topo: entram logo abaixo do cabeçalho, a última recebida primeiro.
+      const cheias = linhas.map(function (l) { while (l.length < largura) l.push(''); return l; }).reverse();
+      aba.insertRowsAfter(1, cheias.length);
+      aba.getRange(2, 1, cheias.length, largura).setValues(cheias).setFontWeight('normal').setBackground(null);
     }
     return saida({ ok: true, linhas: linhas.length });
   } finally {
@@ -92,7 +121,7 @@ function doPost(e) {
 function criarAbas() {
   const ss = SpreadsheetApp.getActive();
   const abas = {
-    Respostas: ['Palavras-chave', 'Resposta', 'Comparação', 'Quem', 'Ativo'],
+    Respostas: ['Palavras-chave', 'Resposta', 'Comparação', 'Quem', 'Ativo', 'Grupos'],
     Consulta: ['Código', 'Resultado'],
   };
   Object.keys(abas).forEach(function (nome) {
@@ -104,7 +133,18 @@ function criarAbas() {
     }
   });
   const r = ss.getSheetByName('Respostas');
-  if (r.getLastRow() === 1) r.appendRow(['preço, valor, quanto custa', 'Nossos preços começam em R$ 50.', 'contém', 'todos', 'sim']);
+  // Planilhas criadas antes da coluna Grupos.
+  if (r.getRange('F1').getValue() === '') r.getRange('F1').setValue('Grupos').setFontWeight('bold').setBackground('#d3f5e3');
+  if (r.getLastRow() === 1) r.appendRow(['preço, valor, quanto custa', 'Nossos preços começam em R$ 50.', 'contém', 'todos', 'sim', 'não']);
+  // Listas de escolha (só avisam se digitar outra coisa, para não travar textos antigos).
+  const lista = function (col, itens) {
+    r.getRange(col + '2:' + col + '1000').setDataValidation(
+      SpreadsheetApp.newDataValidation().requireValueInList(itens, true).setAllowInvalid(true).build());
+  };
+  lista('C', ['contém', 'exata', 'começa com', 'termina com', 'parecida', 'curinga', 'regex', 'todas']);
+  lista('D', ['todos', 'salvos', 'não salvos']);
+  lista('E', ['sim', 'não']);
+  lista('F', ['sim', 'não']);
 }
 
 function saida(o) {

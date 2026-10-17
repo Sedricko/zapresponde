@@ -432,7 +432,7 @@ fun RuleEdit(id: String, done: () -> Unit) {
             Box(Modifier.weight(1f)) { Field("Coluna de busca", r.searchCol) { set { copy(searchCol = it.take(1).uppercase()) } } }
             Box(Modifier.weight(1f)) { Field("Coluna da resposta", r.returnCol) { set { copy(returnCol = it.take(1).uppercase()) } } }
         }
-        Field("Modelo da resposta", r.template, 2, "Use {busca} e {resultado}") { set { copy(template = it) } }
+        Field("Modelo da resposta", r.template, 2, "Use {busca}, {resultado} ou a letra de qualquer coluna, como {C}. Se várias linhas baterem, responde até 5.") { set { copy(template = it) } }
         Field("Se não encontrar", r.fallback, 2) { set { copy(fallback = it) } }
     }
 

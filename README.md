@@ -24,10 +24,10 @@ Se mudar o código do script depois, faça Implantar > Gerenciar implantações 
 
 | Aba | Colunas | Quem escreve |
 | --- | --- | --- |
-| Respostas | A palavras-chave (vírgula) · B resposta (várias com `\|\|` são sorteadas) · C comparação (contém, exata, começa, termina, curinga, regex, parecida, todas) · D quem (todos, contatos, grupos) · E ativo (sim/não) | Você |
-| Consulta | Qualquer tabela. Uma regra do tipo "Consulta na planilha" diz a coluna de busca e a de resposta | Você |
+| Respostas | A palavras-chave (vírgula) · B resposta (várias com `\|\|` são sorteadas) · C comparação (contém, exata, começa, termina, curinga, regex, parecida, todas) · D quem (todos, salvos, não salvos) · E ativo (sim/não) · F grupos (sim/não). C a F têm lista de escolha | Você |
+| Consulta | Qualquer tabela, ou outra planilha ligada em **ZapResponde > Ligar planilha de cargas**. Uma regra do tipo "Consulta na planilha" diz a coluna de busca; o modelo usa {busca}, {resultado} ou {C} (qualquer coluna). Várias linhas iguais (ex.: cargas para a mesma cidade) saem juntas, até 5 | Você |
 | Pedidos | Data, conversa e uma coluna por pergunta | O app |
-| Historico | Data, app, conversa, tipo, mensagem, resposta, regra | O app |
+| Historico | Data, app, conversa, tipo, mensagem, resposta, regra. Mais novas no topo | O app |
 
 A primeira linha de cada aba é o cabeçalho e é ignorada.
 
