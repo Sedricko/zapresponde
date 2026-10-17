@@ -138,6 +138,9 @@ class EngineTest {
         val negociar = "Olá, vi seu frete na FreteBras, e tenho interesse em negociar.\nPágina do frete: https://www.fretebras.com.br/frete/transportes-poloni/carga-de-serra-es-para-salvador-ba/veiculo-carreta/especie-outro/carga-alimenticio/1758154495548"
         assertEquals(Engine.Route("serraes", "salvadorba", "alimenticio", "SERRA/ES → SALVADOR/BA"), Engine.freteRoute(negociar))
         assertTrue(Engine.frete(negociar, sheet + listOf(listOf("Serra/ES para Salvador/BA", "carga serra")), "x") == "carga serra")
+        val soLinkGo = "https://www.fretebras.com.br/frete/transportes-poloni/carga-de-goiania-go-para-rio-verde-go/veiculo-truck/especie-outro/carga-higiene-e-limpeza/1757316291300/"
+        assertEquals(Engine.Route("goianiago", "rioverdego", "higiene", "GOIANIA/GO → RIO VERDE/GO"), Engine.freteRoute(soLinkGo))
+        assertEquals("carga go", Engine.frete(soLinkGo, sheet + listOf(listOf("Goiânia/GO para Rio Verde/GO", "carga go")), "x"))
         val fechada = "estou disponível para carregar seu frete de Cristalina/GO para Cariacica/ES de ALIMENTICIO."
         assertEquals("x", Engine.frete(fechada, sheet, "x"))
         assertEquals(null, Engine.frete(fechada, sheet, ""))
