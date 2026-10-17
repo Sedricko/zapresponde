@@ -42,7 +42,7 @@ App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao Wha
   - Deduplica e lê a planilha na hora quando a mensagem é do FreteBras.
   - `answer` → modo aprovação ou `deliver`, que envia pelo RemoteInput, grava o histórico e enfileira Historico, Pedidos e Leads.
   - `Store.log` grava o registro usado pelo Diagnóstico.
-  - Takeover: tocar na notificação, ou ela sumir mais de 15 s depois da resposta, pausa a conversa por takeoverMin.
+  - Takeover: tocar na notificação ou escrever na conversa (fromMe) pausa por takeoverMin. Notificação sumir por leitura (inclusive WhatsApp Web) só pausa se takeoverOnRead estiver ligado; vem desligado desde a 0.9.3, porque o William usa o WhatsApp Web.
 - **Store.kt:** estado em JSON no filesDir (config, rules, sheet, history, events, state, outbox). Backup em export/import.
 - **Sheets.kt:** web app do Apps Script. `read` faz GET ?key=. `append` faz POST e depois GET no Location. `readBackup` usa ?backup=1. `refresh`, `scriptVersion`. O SyncWorker (WorkManager, mínimo de 15 min) envia a fila e faz o backup diário.
 - **Alerts.kt:** canal "alertas", alerta de carga e notificação de aprovação com Enviar e Descartar (ApprovalReceiver).

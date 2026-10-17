@@ -720,10 +720,13 @@ fun HeaderScreen() {
 @Composable
 fun TakeoverScreen() {
     val c = Store.config
-    Panel { SwitchRow("Ativar pausa", c.takeoverOn) { cfg { copy(takeoverOn = it) } } }
+    Panel {
+        SwitchRow("Ativar pausa", c.takeoverOn) { cfg { copy(takeoverOn = it) } }
+        SwitchRow("Pausar também quando a conversa for lida", c.takeoverOnRead, "Inclui ler pelo WhatsApp Web. Deixe desligado se você usa o Web.") { cfg { copy(takeoverOnRead = it) } }
+    }
     Panel("Duração") {
         NumberField("Tempo de pausa", c.takeoverMin, "min") { cfg { copy(takeoverMin = it) } }
-        Hint("Quando você toca na notificação ou abre a conversa no WhatsApp, o robô para de responder naquela conversa.")
+        Hint("Quando você toca na notificação ou escreve na conversa, o robô para de responder naquela conversa.")
     }
     var tick by remember { mutableStateOf(0) }
     val paused = Store.state.chats.filter { tick >= 0 && it.value.pauseUntil > System.currentTimeMillis() }

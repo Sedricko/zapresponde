@@ -45,8 +45,8 @@ class ReplyService : NotificationListenerService() {
         val action = replyAction(n)
         val msg = parse(sbn) ?: return
         if (action == null) {
-            // Usually a call, a status or a chat WhatsApp won't let us answer from the notification.
-            Store.log(msg.chat, msg.text, "Sem botão Responder na notificação")
+            // A real message without Reply is worth seeing in the diagnostic; WhatsApp's own notices are noise.
+            if (n.category == Notification.CATEGORY_MESSAGE) Store.log(msg.chat, msg.text, "Sem botão Responder na notificação")
             return
         }
 
@@ -132,13 +132,15 @@ class ReplyService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification, rankingMap: RankingMap, reason: Int) {
         val cfg = Store.config
-        if (!cfg.takeoverOn || sbn.packageName !in APPS) return
+        // Only real chats: WhatsApp's own notices ("Procurando novas mensagens") have no Reply button.
+        if (!cfg.takeoverOn || sbn.packageName !in APPS || replyAction(sbn.notification) == null) return
         val msg = parse(sbn) ?: return
         val now = System.currentTimeMillis()
         val lastBot = Store.state.chats[msg.chat]?.lastBotReply ?: 0
-        // Tapping the notification, or WhatsApp clearing it because the chat was opened, means you took over.
+        // Tapping the notification means you took over. WhatsApp also clears it when the chat is merely read,
+        // including on WhatsApp Web, so that only counts if the user asked for it (off by default).
         // Our own reply also makes WhatsApp clear it, so ignore removals right after we answered.
-        val tookOver = reason == REASON_CLICK || (reason == REASON_APP_CANCEL && now - lastBot > 15_000)
+        val tookOver = reason == REASON_CLICK || (cfg.takeoverOnRead && reason == REASON_APP_CANCEL && now - lastBot > 15_000)
         if (tookOver) {
             pending.remove(msg.chat)?.cancel()
             Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)

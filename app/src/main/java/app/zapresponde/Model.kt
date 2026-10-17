@@ -75,6 +75,7 @@ data class Config(
     val formCancel: String = "cancelar",
     val takeoverOn: Boolean = true,
     val takeoverMin: Int = 60,
+    val takeoverOnRead: Boolean = false,
     val loopGuardOn: Boolean = true,
     val contactsOn: Boolean = false,
     val contactsMode: Audience = Audience.EXCEPT_LIST,
