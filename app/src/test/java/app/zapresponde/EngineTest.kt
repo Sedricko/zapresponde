@@ -141,6 +141,8 @@ class EngineTest {
         val soLinkGo = "https://www.fretebras.com.br/frete/transportes-poloni/carga-de-goiania-go-para-rio-verde-go/veiculo-truck/especie-outro/carga-higiene-e-limpeza/1757316291300/"
         assertEquals(Engine.Route("goianiago", "rioverdego", "higiene", "GOIANIA/GO → RIO VERDE/GO"), Engine.freteRoute(soLinkGo))
         assertEquals("carga go", Engine.frete(soLinkGo, sheet + listOf(listOf("Goiânia/GO para Rio Verde/GO", "carga go")), "x"))
+        val lista = listOf("Gerar Lista", "ORIGEM: CRISTALINA/GO\nDESTINO: CARIACICA/ES\n---\nORIGEM: SERRA/ES\nDESTINO: IPIRÁ/BA")
+        assertEquals("x", Engine.frete("frete de Cristalina/GO para Cariacica/ES de ALIMENTICIO", sheet + listOf(lista), "x"))
         val fechada = "estou disponível para carregar seu frete de Cristalina/GO para Cariacica/ES de ALIMENTICIO."
         assertEquals("x", Engine.frete(fechada, sheet, "x"))
         assertEquals(null, Engine.frete(fechada, sheet, ""))

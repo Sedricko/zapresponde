@@ -245,6 +245,8 @@ object Engine {
             return Route(place(g[1], g[2]), place(g[3], g[4]))
         }
         val all = normalize(row.joinToString("\n"))
+        // A list of many loads ("Gerar Lista") is not one load: only rows with a single ORIGEM count.
+        if (Regex("origem:").findAll(all).count() != 1) return null
         val o = Regex("""origem:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
         val d = Regex("""destino:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
         return Route(place(o[1], o[2]), place(d[1], d[2]))
