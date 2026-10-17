@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -149,7 +150,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "test" to "Testar respostas", "help" to "Não está funcionando?",
+    "loop" to "Proteção contra loop", "ignore" to "Ignorar contatos", "test" to "Testar respostas", "help" to "Não está funcionando?",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -183,6 +184,7 @@ fun App() {
                     "header" -> HeaderScreen()
                     "takeover" -> TakeoverScreen()
                     "loop" -> LoopScreen()
+                    "ignore" -> IgnoreScreen()
                     "test" -> TestScreen()
                     "help" -> HelpScreen()
                 }
@@ -617,6 +619,8 @@ fun MoreTab(open: (String) -> Unit) {
         FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você abrir a conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
         Divider()
         FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
+        Divider()
+        FeatureRow(Icons.Default.Close, "Ignorar contatos", "Não responde quem estiver na lista", c.ignoreOn, { on -> cfg { copy(ignoreOn = on) } }) { open("ignore") }
     }
     Panel("Ferramentas") {
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
@@ -712,6 +716,15 @@ fun LoopScreen() {
     val c = Store.config
     Panel { SwitchRow("Ativar proteção contra loop", c.loopGuardOn) { cfg { copy(loopGuardOn = it) } } }
     Panel { Hint("Se o app responder 5 vezes à mesma conversa em 2 minutos, ela fica pausada por 30 minutos.") }
+}
+
+@Composable
+fun IgnoreScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Ativar ignorar contatos", c.ignoreOn) { cfg { copy(ignoreOn = it) } }
+        Field("Contatos e grupos para ignorar", c.ignoreList, lines = 3, help = "Nomes como aparecem no WhatsApp, separados por vírgula ou um por linha.") { cfg { copy(ignoreList = it) } }
+    }
 }
 
 @Composable

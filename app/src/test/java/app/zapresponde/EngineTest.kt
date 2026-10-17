@@ -19,6 +19,8 @@ class EngineTest {
     @Test fun matchTypes() {
         fun r(m: Match, k: String) = Rule(match = m, keywords = k)
         assertTrue(Engine.matches(r(Match.CONTAINS, "preço, valor"), "Qual o PRECO?"))
+        assertFalse(Engine.matches(r(Match.CONTAINS, "oi, ola"), "Tenho dois fretes, carga de Angola"))
+        assertTrue(Engine.matches(r(Match.CONTAINS, "bom dia"), "ok, bom dia!"))
         assertFalse(Engine.matches(r(Match.EXACT, "oi"), "oi tudo bem"))
         assertTrue(Engine.matches(r(Match.STARTS, "bom dia"), "Bom dia!"))
         assertTrue(Engine.matches(r(Match.WILDCARD, "oi*tudo bem//ola*"), "Oi, tudo bem"))
@@ -31,6 +33,19 @@ class EngineTest {
         val rule = Rule(match = Match.ALL, replies = listOf("Olá {primeiro_nome}, {saudacao}"))
         assertTrue(run(msg("oi"), listOf(rule), on.copy(enabled = false)).replies.isEmpty())
         assertEquals(listOf("Olá Maria, bom dia"), run(msg("oi"), listOf(rule)).replies)
+        assertEquals(listOf("Olá, bom dia"), run(msg("oi", sender = "+55 11 99999-0000"), listOf(rule)).replies)
+    }
+
+    @Test fun ignoreList() {
+        val rule = Rule(match = Match.ALL, replies = listOf("ok"))
+        val meu = msg("oi", sender = "Meu")
+        assertEquals(listOf("ok"), run(meu, listOf(rule)).replies)
+        val ign = on.copy(ignoreOn = true, ignoreList = "João, Família, Meu")
+        assertTrue(run(meu, listOf(rule), ign).replies.isEmpty())
+        assertEquals(listOf("ok"), run(meu, listOf(rule), ign.copy(ignoreOn = false)).replies)
+        assertTrue(run(msg("oi", sender = "joao"), listOf(rule), ign).replies.isEmpty())
+        assertEquals(listOf("ok"), run(msg("oi"), listOf(rule), ign).replies)
+        assertTrue(run(msg("oi").copy(fromMe = true), listOf(rule)).replies.isEmpty())
     }
 
     @Test fun groupsAndContacts() {

@@ -44,6 +44,12 @@ class ReplyService : NotificationListenerService() {
         seen.addLast(key); if (seen.size > 200) seen.removeFirst()
 
         val cfg = Store.config
+        val now = System.currentTimeMillis()
+        val cs = Store.state.chats[msg.chat]
+        if (msg.fromMe && cfg.takeoverOn && msg.text !in cs?.lastTexts.orEmpty() && now - (cs?.lastBotReply ?: 0) > 15_000) {
+            pending.remove(msg.chat)?.cancel()
+            Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)
+        }
         val d = synchronized(Store) {
             Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), cfg, Store.allRules(),
@@ -118,9 +124,12 @@ class ReplyService : NotificationListenerService() {
             val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: return null
             var text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: return null
             var sender = title
+            var fromMe = false
             lastMessage(n)?.let { b ->
                 b.getCharSequence("text")?.let { text = it.toString() }
                 b.getCharSequence("sender")?.let { sender = it.toString() }
+                // MessagingStyle leaves the sender empty on messages the phone owner sent.
+                fromMe = b.getCharSequence("sender") == null && b.get("sender_person") == null
             }
             val conv = ex.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
             var isGroup = ex.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION)
@@ -133,7 +142,7 @@ class ReplyService : NotificationListenerService() {
             // Group titles can carry a counter like "Família (3 mensagens)".
             chat = chat.replace(Regex("\\s*\\(\\d+ \\w+\\)$"), "")
             if (text.isBlank()) return null
-            return Incoming(chat, sender, text, isGroup, APPS[sbn.packageName] ?: sbn.packageName)
+            return Incoming(chat, sender, text, isGroup, APPS[sbn.packageName] ?: sbn.packageName, fromMe)
         }
     }
 }

@@ -24,6 +24,12 @@ object Engine {
         random: Random = Random.Default,
     ): Decision {
         if (!cfg.enabled) return skip("Respostas automáticas desligadas")
+        // Answering this would send the bot's reply to the contact because *you* wrote; ReplyService treats it as takeover.
+        if (msg.fromMe) return skip("Mensagem enviada por você na conversa")
+        if (cfg.ignoreOn) {
+            val names = splitList(cfg.ignoreList).map { normalize(it) }
+            if (normalize(msg.chat) in names || normalize(msg.sender) in names) return skip("Contato na lista de ignorados")
+        }
         if (cfg.scheduleOn && !inWindow(cfg.scheduleHours, cfg.scheduleDays, now)) return skip("Fora da agenda")
         val cs = state.chats.getOrPut(msg.chat) { ChatState() }
         if (cs.pauseUntil > nowMs) return skip("Conversa pausada")
@@ -152,7 +158,7 @@ object Engine {
         val keys = splitList(r.keywords).map { normalize(it) }
         return when (r.match) {
             Match.ALL -> true
-            Match.CONTAINS -> keys.any { t.contains(it) }
+            Match.CONTAINS -> keys.any { hasWord(t, it) }
             Match.EXACT -> keys.any { t == it }
             Match.STARTS -> keys.any { t.startsWith(it) }
             Match.ENDS -> keys.any { t.endsWith(it) }
@@ -164,13 +170,16 @@ object Engine {
         }
     }
 
+    /** Whole-word (or whole-phrase) match, so "oi" does not fire on "dois". Both sides already normalized. */
+    fun hasWord(t: String, k: String) = k.isNotEmpty() && Regex("(^|\\W)" + Regex.escape(k) + "($|\\W)").containsMatchIn(t)
+
     /** Finds the "Consulta" row whose search cell appears in the message; longest match wins. */
     fun lookup(r: Rule, text: String, rows: List<List<String>>): String? {
         val t = normalize(text)
         val s = col(r.searchCol); val ret = col(r.returnCol)
         val hit = rows.drop(1)
             .filter { it.size > maxOf(s, ret) && it[s].isNotBlank() }
-            .filter { Regex("(^|\\W)" + Regex.escape(normalize(it[s])) + "($|\\W)").containsMatchIn(t) }
+            .filter { hasWord(t, normalize(it[s])) }
             .maxByOrNull { it[s].length }
         return if (hit == null) r.fallback.ifBlank { null }
         else r.template.replace("{busca}", hit[s]).replace("{resultado}", hit[ret])
@@ -209,8 +218,11 @@ object Engine {
     fun fill(s: String, msg: Incoming, now: LocalDateTime, count: Int): String {
         val br = Locale("pt", "BR")
         val h = now.hour
+        // Unsaved contacts come as a phone number; "Olá +55, ..." reads badly, so drop the name instead.
+        val first = msg.sender.trim().split(" ").first().takeIf { w -> w.any { it.isLetter() } }.orEmpty()
         return s.replace("{nome}", msg.sender)
-            .replace("{primeiro_nome}", msg.sender.trim().split(" ").first())
+            .let { if (first.isEmpty()) it.replace(" {primeiro_nome}", "") else it }
+            .replace("{primeiro_nome}", first)
             .replace("{mensagem}", msg.text)
             .replace("{data}", now.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))
             .replace("{hora}", now.format(DateTimeFormatter.ofPattern("HH:mm")))

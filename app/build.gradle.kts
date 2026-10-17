@@ -12,8 +12,8 @@ android {
         applicationId = "app.zapresponde"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
     }
     // Fixed key so each new APK installs over the previous one (CI would otherwise make a new debug key every build).
     signingConfigs {

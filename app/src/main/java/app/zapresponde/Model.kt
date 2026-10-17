@@ -76,6 +76,8 @@ data class Config(
     val takeoverOn: Boolean = true,
     val takeoverMin: Int = 60,
     val loopGuardOn: Boolean = true,
+    val ignoreOn: Boolean = false,
+    val ignoreList: String = "",
     val sheetOn: Boolean = false,
     val sheetUrl: String = "",
     val sheetKey: String = "",
@@ -107,6 +109,8 @@ data class Incoming(
     val text: String,
     val isGroup: Boolean,
     val app: String = "WhatsApp",
+    /** You wrote this inside someone else's chat (reply from the notification or a linked device). */
+    val fromMe: Boolean = false,
 )
 
 data class Decision(
