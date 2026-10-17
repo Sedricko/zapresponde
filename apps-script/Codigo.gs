@@ -26,7 +26,15 @@ function conectar() {
   const t = HtmlService.createTemplate(HTML);
   t.qrUrl = url.endsWith('/exec') ? url : '';
   t.qrKey = chave();
-  SpreadsheetApp.getUi().showModalDialog(t.evaluate().setWidth(380).setHeight(560), 'Conectar o ZapResponde');
+  let ui;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (err) {
+    // Run from the editor while the spreadsheet tab is closed: the dialog has nowhere to appear.
+    console.log('Link: ' + (url || '(implante primeiro)') + '\nChave: ' + chave());
+    throw new Error('Abra a planilha em outra aba, recarregue e use o menu ZapResponde > Conectar celular. (O link e a chave também estão no registro acima, para digitar no app.)');
+  }
+  ui.showModalDialog(t.evaluate().setWidth(380).setHeight(560), 'Conectar o ZapResponde');
 }
 
 function novaChave() {
