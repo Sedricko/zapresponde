@@ -117,7 +117,15 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         setContent { ZapTheme { App() } }
     }
+
+    override fun onResume() {
+        super.onResume()
+        resumeTick++
+    }
 }
+
+// Bumped on every return to the app so permission checks refresh after visiting system settings.
+private var resumeTick by mutableStateOf(0)
 
 private fun cfg(f: Config.() -> Config) = Store.updateConfig(Store.config.f())
 
@@ -233,7 +241,7 @@ private fun Page(pad: PaddingValues, content: @Composable ColumnScope.() -> Unit
 fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
     val c = Store.config
     val ctx = LocalContext.current
-    val access = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    val access = resumeTick >= 0 && NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
     val bg by animateColorAsState(if (c.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh, label = "bg")
     val fg = if (c.enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
 
@@ -701,9 +709,9 @@ fun TestScreen() {
 @Composable
 fun HelpScreen() {
     val ctx = LocalContext.current
-    val access = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
-    val battery = ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
-    val notifs = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    val access = resumeTick >= 0 && NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    val battery = resumeTick >= 0 && ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
+    val notifs = resumeTick >= 0 && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
     Panel("Verificações") {
         Check("Acesso às notificações", access) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         Divider()
