@@ -1,6 +1,9 @@
+// ZapResponde - script da planilha, versão 0.7.1 (a mesma do app que acompanha)
 // ZapResponde: cole este código em Extensões > Apps Script da sua planilha e salve.
 // Depois: Implantar > Nova implantação > App da Web (executar como "Eu", acesso "Qualquer pessoa").
 // Por fim, recarregue a planilha e use o menu ZapResponde > Conectar celular. Não precisa editar nada aqui.
+
+const VERSAO = '0.7.1'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
 
 function chave() {
   const props = PropertiesService.getScriptProperties();
@@ -17,7 +20,13 @@ function onOpen() {
     .addItem('Conectar celular', 'conectar')
     .addItem('Ligar planilha de cargas', 'ligarCargas')
     .addItem('Gerar nova chave', 'novaChave')
+    .addSeparator()
+    .addItem('Versão do script: ' + VERSAO, 'versao')
     .addToUi();
+}
+
+function versao() {
+  SpreadsheetApp.getUi().alert('Script ZapResponde versão ' + VERSAO);
 }
 
 // Cria as abas que faltam e mostra o QR code que o app lê.
@@ -169,6 +178,7 @@ const HTML = `<!DOCTYPE html><html><head><base target="_top">
 <div class="passo">No celular: ZapResponde &gt; Planilha &gt; <b>Ler QR code</b>.</div>
 <div id="qr"></div>
 <div class="passo">A chave fica guardada no script. Para trocar, use o menu ZapResponde &gt; Gerar nova chave.</div>
+<div class="passo">Script versão <?!= VERSAO ?></div>
 <script>
   const chave = <?!= JSON.stringify(qrKey) ?>;
   document.getElementById('url').value = <?!= JSON.stringify(qrUrl) ?>;
