@@ -1,9 +1,9 @@
-// ZapResponde - script da planilha, versão 0.7.1 (a mesma do app que acompanha)
+// ZapResponde - script da planilha, versão 0.7.2
 // ZapResponde: cole este código em Extensões > Apps Script da sua planilha e salve.
 // Depois: Implantar > Nova implantação > App da Web (executar como "Eu", acesso "Qualquer pessoa").
 // Por fim, recarregue a planilha e use o menu ZapResponde > Conectar celular. Não precisa editar nada aqui.
 
-const VERSAO = '0.7.1'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
+const VERSAO = '0.7.2'; // aparece no menu da planilha e na janela do QR; atualizar a cada mudança
 
 function chave() {
   const props = PropertiesService.getScriptProperties();
@@ -79,7 +79,7 @@ function ligarCargas() {
   let aba;
   try { aba = SpreadsheetApp.openByUrl(link).getSheets()[0]; } catch (err) { ui.alert('Não consegui abrir esse link: ' + err.message); return; }
   props.setProperty('CARGAS', link);
-  ui.alert('Ligado à aba "' + aba.getName() + '" (' + Math.max(aba.getLastRow() - 1, 0) + ' linhas). No app, crie uma regra de Consulta e escolha a coluna de busca (ex.: destino).');
+  ui.alert('Ligado à aba "' + aba.getName() + '" (' + Math.max(aba.getLastRow() - 1, 0) + ' linhas). No app, ligue Ajustes > Fretes FreteBras.');
 }
 
 function consulta(ss) {
