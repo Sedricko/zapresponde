@@ -623,6 +623,8 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Info, "Não está funcionando?", "Verifique permissões e bateria", null) { open("help") }
     }
+    val ctx = LocalContext.current
+    Hint("ZapResponde versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
 }
 
 @Composable
