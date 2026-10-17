@@ -235,6 +235,14 @@ object Engine {
         return 100 - d[a.length][b.length] * 100 / maxOf(a.length, b.length)
     }
 
+    /** QR code shown by the sheet script: {"zapresponde":1,"url":".../exec","key":"..."}. */
+    fun parseConnectQr(raw: String): Pair<String, String>? = runCatching {
+        val o = kotlinx.serialization.json.Json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+        fun str(k: String) = (o[k] as kotlinx.serialization.json.JsonPrimitive).content
+        val url = str("url"); val key = str("key")
+        if (!url.startsWith("https://script.google.com/") || !url.endsWith("/exec") || key.isBlank()) null else url to key
+    }.getOrNull()
+
     /** Respostas tab: A keywords, B reply (several separated by "||" are sorted at random), C match, D who, E active. */
     fun rulesFromSheet(rows: List<List<String>>): List<Rule> = rows.drop(1).mapIndexedNotNull { i, row ->
         val keys = row.getOrElse(0) { "" }.trim()

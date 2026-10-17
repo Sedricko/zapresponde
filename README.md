@@ -11,12 +11,12 @@ App Android próprio de respostas automáticas para WhatsApp e WhatsApp Business
 
 ## Conectar a planilha
 
-1. Crie uma planilha no Google Sheets.
-2. Extensões > Apps Script. Apague o que estiver lá e cole o conteúdo de [`apps-script/Codigo.gs`](apps-script/Codigo.gs).
-3. Troque `TROQUE-ESTA-CHAVE` por uma senha sua.
-4. Rode a função `criarAbas` uma vez (cria as abas Respostas e Consulta com exemplo). Autorize quando pedir.
-5. Implantar > Nova implantação > tipo **App da Web**. Executar como: **Eu**. Quem pode acessar: **Qualquer pessoa**. Copie o link que termina em `/exec`.
-6. No app: Google Sheets > cole o link e a senha > ligue "Usar planilha" > Sincronizar agora.
+1. Crie uma planilha no Google Sheets e abra **Extensões > Apps Script**. Apague o que estiver lá, cole o conteúdo de [`apps-script/Codigo.gs`](apps-script/Codigo.gs) e salve. Não precisa editar nada.
+2. **Implantar > Nova implantação**, tipo **App da Web**. Executar como: **Eu**. Quem pode acessar: **Qualquer pessoa**. Autorize quando o Google pedir.
+3. Recarregue a planilha. No menu **ZapResponde > Conectar celular** aparece um QR code (as abas Respostas e Consulta são criadas nessa hora).
+4. No app: **Planilha > Ler QR code**. O app conecta, testa e sincroniza sozinho.
+
+A chave de acesso é gerada e guardada pelo próprio script. Para trocar, use **ZapResponde > Gerar nova chave** e leia o QR de novo.
 
 Se mudar o código do script depois, faça Implantar > Gerenciar implantações > editar > Nova versão, senão o link continua com o código antigo.
 

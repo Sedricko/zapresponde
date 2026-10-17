@@ -116,4 +116,11 @@ class EngineTest {
         val r = Rule(match = Match.ALL, replies = listOf("a", "b"), replyMode = ReplyMode.SEQUENCE)
         assertEquals(listOf("[Loja]\na", "b\nObrigado"), run(msg("x"), listOf(r), cfg).replies)
     }
+
+    @Test fun connectQr() {
+        val url = "https://script.google.com/macros/s/abc/exec"
+        assertEquals(url to "k1", Engine.parseConnectQr("""{"zapresponde":1,"url":"$url","key":"k1"}"""))
+        assertEquals(null, Engine.parseConnectQr("""{"url":"https://evil.com/exec","key":"k1"}"""))
+        assertEquals(null, Engine.parseConnectQr("texto qualquer"))
+    }
 }
