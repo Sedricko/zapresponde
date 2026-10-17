@@ -11,6 +11,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -34,8 +36,8 @@ import java.util.concurrent.TimeUnit
 object Sheets {
     /** Version the deployed web app reported on the last read. */
     var scriptVersion = ""
-    private fun open(url: String): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 20_000; readTimeout = 30_000
+    private fun open(url: String, readMs: Int = 30_000): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
+        connectTimeout = minOf(20_000, readMs); readTimeout = readMs
     }
 
     private fun readBody(c: HttpURLConnection): String {
@@ -53,9 +55,9 @@ object Sheets {
         return o
     }
 
-    fun read(cfg: Config): Pair<List<List<String>>, List<List<String>>> {
+    fun read(cfg: Config, fast: Boolean = false): Pair<List<List<String>>, List<List<String>>> {
         val url = cfg.sheetUrl.trim() + "?key=" + URLEncoder.encode(cfg.sheetKey, "UTF-8")
-        val o = parse(readBody(open(url)))
+        val o = parse(readBody(open(url, if (fast) 8_000 else 30_000)))
         scriptVersion = o["versao"]?.jsonPrimitive?.content ?: "antiga (sem número)"
         fun tab(name: String) = (o[name] as? JsonArray).orEmpty().map { row -> row.jsonArray.map { it.jsonPrimitive.content } }
         return tab("Respostas") to tab("Consulta")
@@ -83,8 +85,8 @@ object Sheets {
         return parse(readBody(open(url)))["Backup"]?.jsonPrimitive?.content?.ifBlank { null }
     }
 
-    fun refresh(cfg: Config) {
-        val (respostas, consulta) = read(cfg)
+    fun refresh(cfg: Config, fast: Boolean = false) {
+        val (respostas, consulta) = read(cfg, fast)
         Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
     }
 
@@ -114,28 +116,44 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         Store.init(applicationContext)
         val cfg = Store.config
         if (!cfg.sheetOn || cfg.sheetUrl.isBlank()) return@withContext Result.success()
-        try {
+        var erro: String? = null
+        // Uma sincronização por vez: o periódico e o imediato não enviam as mesmas linhas duas vezes.
+        flush.withLock {
             val box = Store.outbox
-            if (box.historico.isNotEmpty()) Sheets.append(
-                cfg, "Historico", listOf("Data", "App", "Conversa", "Tipo", "Mensagem", "Resposta", "Regra"), box.historico,
-            )
-            if (box.pedidos.isNotEmpty()) {
+            // Cada aba é enviada e baixada da fila sozinha: uma falha não repete nem bloqueia as outras.
+            fun step(nome: String, n: Int, send: () -> Unit, mark: () -> Unit) {
+                if (n == 0) return
+                runCatching { send(); mark() }.onFailure { erro = erro ?: "$nome: ${it.message}" }
+            }
+            step("Historico", box.historico.size, {
+                Sheets.append(cfg, "Historico", listOf("Data", "App", "Conversa", "Tipo", "Mensagem", "Resposta", "Regra"), box.historico)
+            }, { Store.sent(box.historico.size, 0, 0) })
+            step("Pedidos", box.pedidos.size, {
                 val qs = cfg.formQuestions.lines().map { it.trim() }.filter { it.isNotEmpty() }
                 Sheets.append(cfg, "Pedidos", listOf("Data", "Conversa") + qs, box.pedidos)
-            }
-            if (box.leads.isNotEmpty()) Sheets.append(cfg, "Leads", listOf("Data", "Motorista", "Rota", "Carga", "Status"), box.leads)
-            Store.sent(box.historico.size, box.pedidos.size, box.leads.size)
+            }, { Store.sent(0, box.pedidos.size, 0) })
+            step("Leads", box.leads.size, {
+                Sheets.append(cfg, "Leads", listOf("Data", "Motorista", "Rota", "Carga", "Status"), box.leads)
+            }, { Store.sent(0, 0, box.leads.size) })
             val now = System.currentTimeMillis()
             if (cfg.backupAutoOn && now - Store.state.lastBackup > 24 * 3_600_000L) {
-                val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date(now))
-                Sheets.append(cfg, "Backup", listOf("Data", "Backup"), listOf(listOf(date, Store.exportBackup())))
-                Store.state.lastBackup = now; Store.saveState()
+                runCatching {
+                    val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date(now))
+                    Sheets.append(cfg, "Backup", listOf("Data", "Backup"), listOf(listOf(date, Store.exportBackup())))
+                    Store.state.lastBackup = now; Store.saveState()
+                }.onFailure { erro = erro ?: "Backup: ${it.message}" }
             }
-            Sheets.refresh(cfg)
-            Result.success()
-        } catch (e: Exception) {
-            Store.updateSheet(Store.sheet.copy(error = e.message ?: e.toString()))
-            Result.retry()
         }
+        // A leitura de regras e cargas sempre é tentada, mesmo se algum envio falhou.
+        runCatching { Sheets.refresh(cfg) }.onFailure { erro = erro ?: "Leitura: ${it.message}" }
+        val falha = erro
+        if (falha != null) {
+            Store.updateSheet(Store.sheet.copy(error = falha))
+            Result.retry()
+        } else Result.success()
+    }
+
+    private companion object {
+        val flush = Mutex()
     }
 }
