@@ -230,14 +230,14 @@ object Engine {
 
     /**
      * FreteBras "estou disponível para carregar seu frete" → the ready message of the matching row
-     * (its longest cell), preferring one with the same cargo type; no match → [notFound] (blank = stay silent).
+     * (its longest cell after column A), preferring one with the same cargo type; no match → [notFound] (blank = stay silent).
      * Null when the message is not a FreteBras one.
      */
     fun frete(text: String, rows: List<List<String>>, notFound: String): String? {
         val r = freteRoute(text) ?: return null
         val hits = rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }
         val best = hits.firstOrNull { r.cargo.isNotEmpty() && hasWord(normalize(it.joinToString(" ")), r.cargo) } ?: hits.firstOrNull()
-        return best?.maxByOrNull { it.length }?.trim() ?: notFound.ifBlank { null }
+        return best?.let { row -> (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim() } ?: notFound.ifBlank { null }
     }
 
     private fun col(letter: String) = (letter.trim().uppercase().firstOrNull() ?: 'A') - 'A'
