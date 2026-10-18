@@ -120,7 +120,9 @@ object Engine {
         }
         if (cfg.freteOn) t += "ℹ️ Não é anúncio FreteBras"
         if (cfg.freteOn && !cfg.freteLivreOn) t += "ℹ️ Frete escrito de qualquer jeito desligado"
-        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta, now).also { f ->
+        val blockedBy = if (cfg.freteOn && cfg.freteLivreOn) freteBlocked(msg.text, cfg.freteBlock) else null
+        if (blockedBy != null) t += "ℹ️ Frete escrito: ignorado, a mensagem tem \"$blockedBy\" (conta uma novidade, não pede carga)"
+        if (cfg.freteOn && cfg.freteLivreOn && blockedBy == null) freteLivre(msg.text, consulta, now).also { f ->
             t += if (f == null) "ℹ️ Frete escrito: não é pedido de frete (nenhuma cidade da planilha, anúncio de carga, ou uma cidade só sem \"para\"/\"carga\")"
             else "✅ Frete escrito: entendi ${f.label}, ${f.messages.count { !closed(it) }} carga(s) ativa(s) e ${f.messages.count(::closed)} encerrada(s) na planilha" +
                 if (f.messages.size > 1) "; mandei só a de coleta mais próxima" else ""
@@ -399,6 +401,14 @@ object Engine {
     }
 
     /** Answer to a freight question written freely ("Goiânia para Anápolis", "goiania-GO anapolis", "tem algo pra Brasília?"). Accents and case are ignored; spelling must be right. */
+    private val REQUEST_CUE = Regex("""\?|\b(tem|teria|ha|algo|alguma|algum|preciso|procuro|procurando|quero|busco|buscando|disponivel|consegue|arruma|arrumar|manda|passa)\b""")
+
+    /** First word of [block] (comma-separated) found in the message, or null. */
+    fun freteBlocked(text: String, block: String): String? {
+        val t = normalize(text)
+        return splitList(block).firstOrNull { hasWord(t, normalize(it)) }
+    }
+
     data class FreeFrete(val label: String, val messages: List<String>, val from: List<String> = emptyList(), val to: List<String> = emptyList())
 
     /** An active load of the sheet: its row, origin and destination. */
@@ -481,6 +491,8 @@ object Engine {
             val toCity = Regex("""\b(para|pra|p)\W+""" + found[0][0].words.joinToString("""\W+""")).containsMatchIn(t)
             val asksLoad = Regex("""\b(carga|cargas|frete|fretes)\b""").containsMatchIn(t)
             if (!toCity && !asksLoad) return null
+            // One city in a longer message needs a request cue: "Fechei uma carga c kasia para rio verde ai" is news, not a request.
+            if (words(text).size > 5 && !REQUEST_CUE.containsMatchIn(t)) return null
             val going = loads.filter { it.third.key in keys }
             val hits = going.ifEmpty { if (asksLoad) loads.filter { it.second.key in keys } else emptyList() }
             // A lone city: "pra X" waits/looks for loads going to X; "carga em X" for loads leaving X.

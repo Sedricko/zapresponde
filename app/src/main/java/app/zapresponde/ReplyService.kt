@@ -189,7 +189,7 @@ class ReplyService : NotificationListenerService() {
         }
         // The freight sheet changes all the time; read it fresh so a new load is not answered as "indisponível".
         if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && (Engine.freteRoute(msg.text) != null ||
-                (cfg.freteLivreOn && Engine.freteLivre(msg.text, Store.sheet.consulta) != null))
+                (cfg.freteLivreOn && Engine.freteBlocked(msg.text, cfg.freteBlock) == null && Engine.freteLivre(msg.text, Store.sheet.consulta) != null))
         ) {
             scope.launch {
                 withContext(Dispatchers.IO) {

@@ -393,4 +393,18 @@ class EngineTest {
         assertTrue(Problems.find(cfg2, ev, hist, State(), emptyList(), "", now, 0, now).none { it.fix?.startsWith("exclude:") == true })
         assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 5 · respondidas: 3 · sem resposta: 2"))
     }
+
+    @Test fun novidadeNaoEPedido() {
+        val sheet = listOf(listOf("x", ""), listOf("Goiânia/GO para Rio Verde/GO", "carga rio verde • Coleta: Ter 20/10 08:00"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true, freteNotFound = "indisponível")
+        val rule = Rule(match = Match.ALL, enabled = false)
+        // Everaldo, 18/10 13:49: telling news, not asking.
+        val d = run(msg("Fechei uma carga c kasia para rio verde ai"), listOf(rule), cfg, consulta = sheet)
+        assertTrue(d.replies.isEmpty() && d.trace.any { "\"fechei\"" in it })
+        // Even without the blocking word, one city in a long sentence needs a request cue.
+        assertEquals(null, Engine.freteLivre("Combinei com a kasia uma carga para rio verde ai", sheet))
+        assertEquals(listOf("carga rio verde • Coleta: Ter 20/10 08:00"), Engine.freteLivre("boa tarde, tem alguma carga para rio verde?", sheet)!!.messages)
+        assertEquals(listOf("carga rio verde • Coleta: Ter 20/10 08:00"), run(msg("Goiânia para Rio Verde"), listOf(rule), cfg, consulta = sheet).replies)
+        assertEquals(null, Engine.freteBlocked("tem carga pra Rio Verde?", cfg.freteBlock))
+    }
 }

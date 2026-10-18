@@ -85,6 +85,8 @@ data class Config(
     val freteOn: Boolean = false,
     /** Fretes escritos livremente ("Goiânia para Anápolis"), reconhecendo as cidades da planilha de cargas. */
     val freteLivreOn: Boolean = false,
+    /** Words of a driver telling news, not asking ("Fechei uma carga para Rio Verde"): the written request is ignored. */
+    val freteBlock: String = "fechei, fechou, fechamos, fechado, carreguei, carregando, descarreguei, descarregando, entreguei, entregando, peguei, cheguei, chegando, to indo, tô indo, estou indo, indo pra, indo para, voltando, já tenho, ja tenho",
     val leadsOn: Boolean = false,
     val alertOn: Boolean = false,
     val backupAutoOn: Boolean = false,

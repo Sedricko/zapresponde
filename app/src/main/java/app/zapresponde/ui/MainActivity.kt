@@ -16,7 +16,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -997,10 +997,11 @@ private fun ContactPicker(selected: List<String>, dismiss: () -> Unit, done: (Li
     LaunchedEffect(Unit) { all = withContext(Dispatchers.IO) { Contacts.all(ctx) } }
     var query by remember { mutableStateOf("") }
     val chosen = remember { mutableStateListOf<String>().apply { addAll(selected) } }
-    Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false)) {
+    // decorFitsSystemWindows = false hands the bar sizes to Compose; safeDrawingPadding then keeps the buttons above them.
+    Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize()) {
             // Android 15 draws under the status and navigation bars; without this the bottom buttons hide behind them.
-            Column(Modifier.systemBarsPadding().padding(16.dp)) {
+            Column(Modifier.safeDrawingPadding().padding(16.dp)) {
                 Text("Escolher contatos (${chosen.size})", style = MaterialTheme.typography.titleLarge)
                 Field("Buscar", query) { query = it }
                 val q = Engine.normalize(query)
@@ -1128,6 +1129,8 @@ fun FreteScreen() {
             "Pedido escrito de qualquer jeito", c.freteLivreOn,
             "\"Goiânia para Anápolis\", \"goiania-GO anapolis\", \"tem carga pra Brasília?\": a 1ª cidade é a origem e a 2ª o destino",
         ) { cfg { copy(freteLivreOn = it) } }
+        if (c.freteLivreOn) Field("Não tratar como pedido se tiver", c.freteBlock, lines = 2, maxLines = 4,
+            help = "Separadas por vírgula. Ex.: \"Fechei uma carga para Rio Verde\" conta uma novidade, não pede carga.") { cfg { copy(freteBlock = it) } }
         Divider()
         SwitchRow("Gravar na aba Leads", c.leadsOn, "Data, motorista, rota, carga e se estava disponível") { cfg { copy(leadsOn = it) } }
         SwitchRow("Alerta de carga pedida", c.alertOn, "Notificação no celular quando a carga pedida está disponível; tocar abre a conversa") { cfg { copy(alertOn = it) } }
