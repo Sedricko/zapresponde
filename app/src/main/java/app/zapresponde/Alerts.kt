@@ -11,11 +11,16 @@ import androidx.core.app.NotificationManagerCompat
 
 /** The app's own notifications: load alerts and replies waiting for approval. */
 object Alerts {
-    private const val CHANNEL = "alertas"
+    // A channel's sound and vibration cannot change after it is created, so vibrating alerts need a new channel id.
+    private const val CHANNEL = "alertas_vibra"
 
     private fun channel(ctx: Context) {
-        ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "Alertas do ZapResponde", NotificationManager.IMPORTANCE_HIGH),
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.deleteNotificationChannel("alertas")
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Alertas do ZapResponde", NotificationManager.IMPORTANCE_HIGH).apply {
+                enableVibration(true); vibrationPattern = longArrayOf(0, 400, 200, 400)
+            },
         )
     }
 
@@ -35,13 +40,13 @@ object Alerts {
     fun show(ctx: Context, title: String, text: String, open: PendingIntent?) =
         post(ctx, (System.currentTimeMillis() % 100_000).toInt() + 100_000, base(ctx, title, text, open))
 
-    fun approval(ctx: Context, id: Int, chat: String, reply: String, open: PendingIntent?) {
+    fun approval(ctx: Context, id: Int, chat: String, reply: String, open: PendingIntent?, title: String = "Aprovar resposta para $chat") {
         fun act(send: Boolean) = PendingIntent.getBroadcast(
             ctx, id * 2 + if (send) 1 else 0,
             Intent(ctx, ApprovalReceiver::class.java).putExtra("id", id).putExtra("send", send),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        post(ctx, id, base(ctx, "Aprovar resposta para $chat", reply, open).setAutoCancel(false)
+        post(ctx, id, base(ctx, title, reply, open).setAutoCancel(false)
             .addAction(0, "Enviar", act(true)).addAction(0, "Descartar", act(false)))
     }
 

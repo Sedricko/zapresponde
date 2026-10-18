@@ -319,4 +319,43 @@ class EngineTest {
             Engine.followText(cfg.copy(followText = "{saudacao}, {primeiro_nome}! Entre: {link}"), msg("x", sender = "João Silva"), monday10, 1)
                 .replaceFirstChar { it.uppercase() })
     }
+
+    @Test fun outraCargaEAviso() {
+        val off = "❌ *FRETE INDISPONÍVEL*"
+        val sheet = listOf(
+            listOf("🟢 ONLINE", ""),
+            listOf("Goiânia/GO para Rio Verde/GO", "carga gyn rio verde • Coleta: Qua 21/10 08:00"),
+            listOf("Goiânia/GO para Jataí/GO", "carga gyn jatai • Coleta: Ter 20/10 08:00"),
+            listOf("Senador Canedo/GO para Anápolis/GO", "carga canedo anapolis • Coleta: Ter 20/10 09:00"),
+            listOf("Goiânia/GO para Anápolis/GO", off),
+        )
+        val rule = Rule(match = Match.ALL, replies = listOf("regra"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true, altOn = true, waitOn = true)
+        // Same origin first, nearest pickup: Jataí (20/10) before Rio Verde (21/10).
+        val d = run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, consulta = sheet)
+        assertEquals("GOIANIA/GO → ANAPOLIS/GO não está disponível, mas tenho esta saindo de GOIANIA/GO:\n\ncarga gyn jatai • Coleta: Ter 20/10 08:00", d.replies[0])
+        assertEquals("alternativa: GOIANIA/GO → JATAI/GO", d.leadRow!![3])
+        assertTrue(d.alert!!.contains("ofereci GOIANIA/GO → JATAI/GO"))
+        // Only "same destination": the Senador Canedo load.
+        val d2 = run(msg("Goiânia para Anápolis"), listOf(rule), cfg.copy(altOrigin = false), consulta = sheet)
+        assertTrue(d2.replies[0].endsWith("carga canedo anapolis • Coleta: Ter 20/10 09:00") && "indo para ANAPOLIS/GO" in d2.replies[0])
+        // Off: the closed load's own "indisponível" message.
+        assertEquals(off, run(msg("Goiânia para Anápolis"), listOf(rule), cfg.copy(altOn = false), consulta = sheet).replies[0])
+        // The request waits; when the load shows up, it is found once, then forgotten.
+        val st = State()
+        run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, now = 1_000_000L, consulta = sheet)
+        assertEquals(listOf("GOIANIA/GO → ANAPOLIS/GO"), st.waiting.map { it.label })
+        assertTrue(Engine.waitingFound(st, sheet, monday10, 1_000_000L, 24).isEmpty())
+        val later = sheet + listOf(listOf("Goiânia/GO para Anápolis/GO", "nova carga gyn anapolis • Coleta: Qui 22/10 08:00"))
+        val found = Engine.waitingFound(st, later, monday10, 2_000_000L, 24)
+        assertEquals(listOf("Johon" to "nova carga gyn anapolis • Coleta: Qui 22/10 08:00"), found.map { it.first.chat to it.second })
+        assertTrue(st.waiting.isEmpty() && Engine.waitingFound(st, later, monday10, 2_000_000L, 24).isEmpty())
+        // Expired after the configured hours.
+        run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, now = 1_000_000L, consulta = sheet)
+        assertTrue(Engine.waitingFound(st, later, monday10, 1_000_000L + 25 * 3_600_000L, 24).isEmpty() && st.waiting.isEmpty())
+        // "pra Brasília" waits for any load going there.
+        val st2 = State()
+        run(msg("tem algo pra Brasilia?", sender = "Ana"), listOf(rule), cfg.copy(altOn = false), state = st2, consulta = sheet + listOf(listOf("Brasília/DF para Goiânia/GO", "volta")))
+        assertEquals(1, Engine.waitingFound(st2, sheet + listOf(listOf("Anápolis/GO para Brasília/DF", "ida • Coleta: Ter 20/10 08:00"), listOf("Brasília/DF para Goiânia/GO", "volta")), monday10, 1_000_000L, 24).size)
+    }
 }

@@ -102,6 +102,16 @@ data class Config(
     /** Chave da API do Gemini; fica fora do backup. */
     val aiKey: String = "",
     val aiModel: String = "gemini-flash-latest",
+    /** Oferecer outra carga quando a pedida não existe ou fechou: mesma origem, mesmo destino, mesmo estado. */
+    val altOn: Boolean = false,
+    val altOrigin: Boolean = true,
+    val altDest: Boolean = true,
+    val altState: Boolean = false,
+    val altText: String = "{pedida} não está disponível, mas tenho esta {motivo}:",
+    /** Avisar quando a carga pedida aparecer na planilha. */
+    val waitOn: Boolean = false,
+    val waitMode: WaitMode = WaitMode.ASK,
+    val waitHours: Int = 24,
     /** Acompanhamento: depois de uma conversa respondida pelo app, manda uma vez o link do grupo. */
     val followOn: Boolean = false,
     val followMin: Int = 30,
@@ -130,8 +140,20 @@ class ChatState(
     var followDone: Boolean = false,
 )
 
+/** A freight request that found no active load: [from]/[to] are city keys (empty = any), [label] is for people. */
 @Serializable
-class State(val chats: MutableMap<String, ChatState> = mutableMapOf(), var lastBackup: Long = 0)
+data class Waiting(val chat: String, val from: List<String>, val to: List<String>, val label: String, val time: Long)
+
+@Serializable
+class State(
+    val chats: MutableMap<String, ChatState> = mutableMapOf(),
+    var lastBackup: Long = 0,
+    /** "Avisar quando a carga aparecer": requests waiting for a load. */
+    val waiting: MutableList<Waiting> = mutableListOf(),
+)
+
+/** What to do when a load someone asked for shows up. */
+enum class WaitMode(val label: String) { ASK("Me perguntar antes"), AUTO("Enviar sozinho"), NOTIFY("Só me avisar") }
 
 /** Who the app answers, on top of each rule's own filter. */
 @Serializable

@@ -108,10 +108,14 @@ object Engine {
             val open = found != null && !closed(found)
             t += "✅ Anúncio FreteBras, rota ${route.label}: " +
                 if (open) "carga achada na planilha" else if (found != null) "carga encerrada (FRETE INDISPONÍVEL)" else "rota fora da planilha"
-            val reply = found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
-            return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes", null, random).copy(
-                leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(), if (open) "disponível" else "indisponível"),
-                alert = if (open) "${msg.sender} quer a carga ${route.label}" else null,
+            if (!open) remember(msg, cfg, state, listOf(route.from), listOf(route.to), route.label, nowMs, t)
+            val alt = if (open || !cfg.altOn) null else alternative(listOf(route.from), listOf(route.to), route.label, consulta, now, cfg, t)
+            val reply = alt?.second ?: found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
+            return finish(msg, now, cfg, cs, nowMs, listOf(reply), if (alt != null) "Fretes (outra carga)" else "Fretes", null, random).copy(
+                leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(),
+                    if (open) "disponível" else if (alt != null) "alternativa: ${alt.first}" else "indisponível"),
+                alert = if (open) "${msg.sender} quer a carga ${route.label}"
+                else alt?.let { "${msg.sender} pediu ${route.label}; ofereci ${it.first}" },
             )
         }
         if (cfg.freteOn) t += "ℹ️ Não é anúncio FreteBras"
@@ -121,11 +125,13 @@ object Engine {
             else "✅ Frete escrito: entendi ${f.label}, ${f.messages.count { !closed(it) }} carga(s) ativa(s) e ${f.messages.count(::closed)} encerrada(s) na planilha" +
                 if (f.messages.size > 1) "; mandei só a de coleta mais próxima" else ""
         }?.let { f ->
-            val reply = f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
             val ok = f.messages.firstOrNull()?.let { !closed(it) } == true
-            return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes (texto livre)", null, random).copy(
-                leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else "indisponível"),
-                alert = if (ok) "${msg.sender} quer a carga ${f.label}" else null,
+            if (!ok) remember(msg, cfg, state, f.from, f.to, f.label, nowMs, t)
+            val alt = if (ok || !cfg.altOn) null else alternative(f.from, f.to, f.label, consulta, now, cfg, t)
+            val reply = alt?.second ?: f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
+            return finish(msg, now, cfg, cs, nowMs, listOf(reply), if (alt != null) "Fretes (outra carga)" else "Fretes (texto livre)", null, random).copy(
+                leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else if (alt != null) "alternativa: ${alt.first}" else "indisponível"),
+                alert = if (ok) "${msg.sender} quer a carga ${f.label}" else alt?.let { "${msg.sender} pediu ${f.label}; ofereci ${it.first}" },
             )
         }
 
@@ -393,7 +399,60 @@ object Engine {
     }
 
     /** Answer to a freight question written freely ("Goiânia para Anápolis", "goiania-GO anapolis", "tem algo pra Brasília?"). Accents and case are ignored; spelling must be right. */
-    data class FreeFrete(val label: String, val messages: List<String>)
+    data class FreeFrete(val label: String, val messages: List<String>, val from: List<String> = emptyList(), val to: List<String> = emptyList())
+
+    /** An active load of the sheet: its row, origin and destination. */
+    private data class Load(val row: List<String>, val from: City, val to: City)
+
+    private fun activeLoads(rows: List<List<String>>) = rows.mapNotNull { row ->
+        rowPlaces(row)?.takeIf { !closed(ready(row)) }?.let { p -> Load(row, City(words(p[0]), p[1]), City(words(p[2]), p[3])) }
+    }
+
+    /**
+     * Another active load for a request that has none: leaving the same city, going to the same city, or leaving the
+     * same state, in that order (each one only if turned on); nearest pickup first. Returns (its route, the reply).
+     */
+    private fun alternative(
+        from: List<String>, to: List<String>, asked: String, rows: List<List<String>>, now: LocalDateTime, cfg: Config, t: MutableList<String>,
+    ): Pair<String, String>? {
+        val loads = activeLoads(rows)
+        val ufs = from.map { it.takeLast(2) }.toSet()
+        val tries = listOfNotNull(
+            if (cfg.altOrigin && from.isNotEmpty()) loads.filter { it.from.key in from }.let { l -> l to { x: Load -> "saindo de ${x.from.label}" } } else null,
+            if (cfg.altDest && to.isNotEmpty()) loads.filter { it.to.key in to }.let { l -> l to { x: Load -> "indo para ${x.to.label}" } } else null,
+            if (cfg.altState && ufs.isNotEmpty()) loads.filter { it.from.uf in ufs }.let { l -> l to { x: Load -> "saindo de ${x.from.uf.uppercase()}" } } else null,
+        )
+        for ((list, why) in tries) {
+            val row = nearestFirst(list.map { it.row }, now).firstOrNull() ?: continue
+            val load = list.first { it.row === row }
+            val label = load.from.label + " → " + load.to.label
+            t += "✅ Outra carga: sem carga ativa em $asked, ofereci $label (${why(load)})"
+            val intro = cfg.altText.replace("{pedida}", asked).replace("{motivo}", why(load)).trim()
+            return label to (if (intro.isEmpty()) "" else "$intro\n\n") + ready(row)
+        }
+        t += "ℹ️ Outra carga: nenhuma carga ativa parecida com $asked"
+        return null
+    }
+
+    /** "Avisar quando a carga aparecer": keeps a request without an active load (one per chat and route). */
+    private fun remember(msg: Incoming, cfg: Config, state: State, from: List<String>, to: List<String>, label: String, nowMs: Long, t: MutableList<String>) {
+        if (!cfg.waitOn || msg.isGroup || to.isEmpty()) return
+        state.waiting.removeAll { it.chat == msg.chat && it.label == label }
+        state.waiting += Waiting(msg.chat, from, to, label, nowMs)
+        t += "🔔 Pedido anotado: aviso quando aparecer carga $label (por ${cfg.waitHours} h)"
+    }
+
+    /** Requests whose load showed up, each with the load's ready message; they leave the list. Expired ones are dropped. */
+    fun waitingFound(state: State, rows: List<List<String>>, now: LocalDateTime, nowMs: Long, hours: Int): List<Pair<Waiting, String>> {
+        state.waiting.removeAll { nowMs - it.time > hours * 3_600_000L }
+        val loads = activeLoads(rows)
+        val out = state.waiting.mapNotNull { w ->
+            val hits = loads.filter { (w.from.isEmpty() || it.from.key in w.from) && it.to.key in w.to }
+            nearestFirst(hits.map { it.row }, now).firstOrNull()?.let { w to ready(it) }
+        }
+        state.waiting.removeAll { w -> out.any { it.first === w } }
+        return out
+    }
 
     /**
      * Two sheet cities in the message: first is the origin, second the destination. One city after "para"/"pra": loads
@@ -411,7 +470,7 @@ object Engine {
             val from = found[0].map { it.key }; val to = found[1].map { it.key }
             val hits = loads.filter { it.second.key in from && it.third.key in to }
             val label = (hits.firstOrNull()?.let { it.second.label + " → " + it.third.label }) ?: (found[0][0].label + " → " + found[1][0].label)
-            return FreeFrete(label, ready(hits))
+            return FreeFrete(label, ready(hits), from, to)
         }
         if (found.size == 1) {
             val t = normalize(text)
@@ -420,8 +479,11 @@ object Engine {
             val toCity = Regex("""\b(para|pra|p)\W+""" + found[0][0].words.joinToString("""\W+""")).containsMatchIn(t)
             val asksLoad = Regex("""\b(carga|cargas|frete|fretes)\b""").containsMatchIn(t)
             if (!toCity && !asksLoad) return null
-            val hits = loads.filter { it.third.key in keys }.ifEmpty { if (asksLoad) loads.filter { it.second.key in keys } else emptyList() }
-            return FreeFrete(found[0][0].label, ready(hits))
+            val going = loads.filter { it.third.key in keys }
+            val hits = going.ifEmpty { if (asksLoad) loads.filter { it.second.key in keys } else emptyList() }
+            // A lone city: "pra X" waits/looks for loads going to X; "carga em X" for loads leaving X.
+            return if (toCity || going.isNotEmpty() || hits.isEmpty()) FreeFrete(found[0][0].label, ready(hits), to = keys)
+            else FreeFrete(found[0][0].label, ready(hits), from = keys)
         }
         return null
     }

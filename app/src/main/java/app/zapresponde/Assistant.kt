@@ -125,7 +125,8 @@ object Assistant {
             Você analisa o app ZapResponde, que responde o WhatsApp sozinho lendo as notificações do Android.
             Ordem de decisão para cada mensagem: robô ligado; mensagem não é sua; filtro de contatos; agenda; conversa pausada;
             eco de resposta nossa; proteção contra loop; pedido pela conversa; Fretes FreteBras (frase "frete de X/UF para Y/UF" ou link);
-            frete escrito de qualquer jeito (cidades da planilha de cargas: 1ª origem, 2ª destino); boas-vindas; regras (a primeira que servir).
+            pedido escrito de qualquer jeito (cidades da planilha de cargas: 1ª origem, 2ª destino); sem carga ativa: oferecer outra carga (mesma origem, destino ou estado)
+            e anotar o pedido para avisar quando a carga aparecer; boas-vindas; regras (a primeira que servir). Depois da conversa: link do grupo (acompanhamento).
             "Você" e "Meu" são contatos normais (outro número do dono). O caminho de cada decisão vem no relatório, linha a linha.
             Responda em português simples, para quem não é programador, em texto puro (sem markdown):
             1) para cada mensagem recente que pareça errada (respondeu o que não devia, não respondeu o que devia, respondeu várias vezes), diga o que aconteceu e por quê;

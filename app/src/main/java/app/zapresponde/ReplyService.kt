@@ -31,7 +31,8 @@ class ReplyService : NotificationListenerService() {
     private val approvals = HashMap<Int, Approval>()
     private var nextId = 1
     /** Latest Reply button of each chat: the only way to send the Acompanhamento later. Lost if the app is restarted. */
-    private val lastReply = HashMap<String, Triple<Incoming, Notification.Action, String>>()
+    private class Last(val msg: Incoming, val action: Notification.Action, val pkg: String, val open: android.app.PendingIntent?)
+    private val lastReply = HashMap<String, Last>()
     private var followJob: Job? = null
 
     override fun onCreate() {
@@ -49,7 +50,40 @@ class ReplyService : NotificationListenerService() {
     override fun onListenerConnected() {
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
-        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck() } }
+        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck() } }
+    }
+
+    /** "Avisar quando a carga aparecer": a load someone asked for is now in the sheet. Ask, send by itself, or only tell you. */
+    private fun waitCheck() {
+        val cfg = Store.config
+        if (!cfg.waitOn || !cfg.freteOn) return
+        val now = System.currentTimeMillis()
+        val found = synchronized(Store) {
+            Engine.waitingFound(Store.state, Store.sheet.consulta, LocalDateTime.now(), now, cfg.waitHours).also { Store.saveState() }
+        }
+        for ((w, load) in found) {
+            val r = lastReply[w.chat]
+            val paused = (Store.state.chats[w.chat]?.pauseUntil ?: 0) > now
+            val asked = "${w.chat} pediu ${w.label} às ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(w.time))}"
+            if (r == null || cfg.waitMode == WaitMode.NOTIFY) {
+                Alerts.show(this, "Apareceu a carga que ${w.chat} pediu", "$asked. Agora tem carga." +
+                    if (r == null && cfg.waitMode != WaitMode.NOTIFY) " Responda à mão: o app não consegue mais responder essa conversa." else "", r?.open)
+                Store.log(w.chat, "", "🔔 Carga pedida apareceu (${w.label}): avisei você")
+                continue
+            }
+            when {
+                cfg.waitMode == WaitMode.AUTO && !paused -> {
+                    deliver(r.msg, r.action, r.pkg, Decision(listOf(load), "Carga que apareceu"), synchronized(Store) { Store.state.chats[w.chat]?.let(::copyOf) })
+                    Alerts.show(this, "Mandei a carga para ${w.chat}", "$asked. Enviei a carga que apareceu.", r.open)
+                }
+                else -> {
+                    val id = nextId++
+                    approvals[id] = Approval(r.msg, r.action, r.pkg, Decision(listOf(load), "Carga que apareceu"), synchronized(Store) { Store.state.chats[w.chat]?.let(::copyOf) })
+                    Alerts.approval(this, id, w.chat, "$asked. Agora tem carga:\n\n$load", r.open, "Apareceu a carga que ${w.chat} pediu")
+                    Store.log(w.chat, "", "🔔 Carga pedida apareceu (${w.label}): esperando você tocar em Enviar")
+                }
+            }
+        }
     }
 
     /** Sends each Acompanhamento whose time has come, through the last Reply button seen in that chat. */
@@ -62,7 +96,7 @@ class ReplyService : NotificationListenerService() {
         for (chat in due) {
             val r = lastReply[chat]
             if (r == null) { Store.log(chat, "", "Acompanhamento não enviado: o app foi reiniciado e perdeu o botão Responder desta conversa"); continue }
-            val (msg, action, pkg) = r
+            val msg = r.msg; val action = r.action; val pkg = r.pkg
             if (!cfg.followOn || cfg.followLink.isBlank()) { Store.log(chat, "", "Acompanhamento não enviado: função desligada ou sem link do grupo"); continue }
             val text = synchronized(Store) {
                 val cs = Store.state.chats.getOrPut(chat) { ChatState() }
@@ -110,7 +144,7 @@ class ReplyService : NotificationListenerService() {
             return
         }
 
-        if (!msg.isGroup) lastReply[msg.chat] = Triple(msg, action, sbn.packageName)
+        if (!msg.isGroup) lastReply[msg.chat] = Last(msg, action, sbn.packageName, n.contentIntent)
         // WhatsApp re-posts the same notification with the whole history; handle each message once.
         val key = "${msg.chat}|${msg.text}|${lastMessageTime(n)}"
         if (key in seen) return

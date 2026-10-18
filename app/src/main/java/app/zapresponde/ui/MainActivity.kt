@@ -166,7 +166,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "follow" to "Acompanhamento", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -205,6 +205,8 @@ fun App() {
                     "approval" -> ApprovalScreen()
                     "frete" -> FreteScreen()
                     "follow" -> FollowScreen()
+                    "alt" -> AltScreen()
+                    "wait" -> WaitScreen()
                     "test" -> TestScreen()
                     "ai" -> AssistantScreen()
                     "help" -> HelpScreen()
@@ -639,47 +641,102 @@ fun HistoryScreen() {
 @Composable
 fun MoreTab(open: (String) -> Unit) {
     val c = Store.config
+    fun on(b: Boolean) = if (b) "ligado" else "desligado"
+    // Every freight feature works only with "Respostas de frete" on; say so instead of failing silently.
+    val needsFrete = if (c.freteOn) "" else " · precisa de Respostas de frete ligado"
+    Panel("Fretes") {
+        FeatureRow(Icons.Default.Search, "Respostas de frete", "Anúncio do FreteBras ou link: manda a carga da planilha", c.freteOn, { on -> cfg { copy(freteOn = on) } }) { open("frete") }
+        Divider()
+        FeatureRow(Icons.Default.Edit, "Pedido escrito de qualquer jeito", "\"Goiânia para Anápolis\", \"tem carga pra Brasília?\"$needsFrete", c.freteLivreOn, { on -> cfg { copy(freteLivreOn = on) } }) { open("frete") }
+        Divider()
+        FeatureRow(Icons.Default.Refresh, "Oferecer outra carga", "Sem a carga pedida, oferece uma parecida$needsFrete", c.altOn, { on -> cfg { copy(altOn = on) } }) { open("alt") }
+        Divider()
+        FeatureRow(Icons.Default.Notifications, "Avisar quando a carga aparecer", "${c.waitMode.label}$needsFrete", c.waitOn, { on -> cfg { copy(waitOn = on) } }) { open("wait") }
+        Divider()
+        FeatureRow(Icons.Default.Share, "Link do grupo depois da conversa", "Acompanhamento: ${c.followMin} min depois da última mensagem", c.followOn, { on -> cfg { copy(followOn = on) } }) { open("follow") }
+        Divider()
+        FeatureRow(Icons.AutoMirrored.Filled.List, "Leads e alerta de carga", "Aba Leads ${on(c.leadsOn)} · alerta ${on(c.alertOn)}", null) { open("frete") }
+    }
     Panel("Respostas") {
-        FeatureRow(Icons.Default.Search, "Fretes FreteBras", "Responde o motorista com a carga da rota", c.freteOn, { on -> cfg { copy(freteOn = on) } }) { open("frete") }
-        Divider()
-        FeatureRow(Icons.AutoMirrored.Filled.List, "Aba Leads", "Grava cada motorista que pediu carga", c.leadsOn, { on -> cfg { copy(leadsOn = on) } }) { open("frete") }
-        Divider()
-        FeatureRow(Icons.Default.Notifications, "Alerta de carga pedida", "Avisa no celular quando a carga está disponível", c.alertOn, { on -> cfg { copy(alertOn = on) } }) { open("frete") }
-        Divider()
-        FeatureRow(Icons.Default.Share, "Acompanhamento", "Manda o link do grupo ${c.followMin} min depois da conversa", c.followOn, { on -> cfg { copy(followOn = on) } }) { open("follow") }
-        Divider()
-        FeatureRow(Icons.Default.CheckCircle, "Modo aprovação", "Você confirma antes de enviar", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
-        Divider()
         FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
         Divider()
         FeatureRow(Icons.Default.ShoppingCart, "Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { open("form") }
         Divider()
         FeatureRow(Icons.Default.Edit, "Cabeçalho e rodapé", "Texto fixo antes e depois das respostas", c.headerFooterOn, { on -> cfg { copy(headerFooterOn = on) } }) { open("header") }
     }
-    Panel("Comportamento") {
-        FeatureRow(Icons.Default.Refresh, "Atraso humano", "Espera de ${c.delayMinSec} a ${c.delayMaxSec} segundos", c.delayOn, { on -> cfg { copy(delayOn = on) } }) { open("delay") }
+    Panel("Quem e quando") {
+        FeatureRow(Icons.Default.Person, "Contatos", "Vale para o app todo: " + AUDIENCE[c.contactsMode].orEmpty() + if (c.groupsOn) " · grupos sim" else " · grupos não", c.contactsOn, { on -> cfg { copy(contactsOn = on) } }) { open("contacts") }
         Divider()
         FeatureRow(Icons.Default.DateRange, "Agenda", "Só responde em ${c.scheduleHours}", c.scheduleOn, { on -> cfg { copy(scheduleOn = on) } }) { open("schedule") }
+    }
+    Panel("Segurança") {
+        FeatureRow(Icons.Default.CheckCircle, "Aprovar antes de enviar", "Você confirma cada resposta pela notificação", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
         Divider()
         FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você tocar na notificação ou escrever na conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
         Divider()
-        FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
+        FeatureRow(Icons.Default.Refresh, "Atraso humano", "Espera de ${c.delayMinSec} a ${c.delayMaxSec} segundos antes de responder", c.delayOn, { on -> cfg { copy(delayOn = on) } }) { open("delay") }
         Divider()
-        FeatureRow(Icons.Default.Person, "Contatos", AUDIENCE[c.contactsMode].orEmpty() + if (c.groupsOn) " · grupos sim" else " · grupos não", c.contactsOn, { on -> cfg { copy(contactsOn = on) } }) { open("contacts") }
+        FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
     }
     Panel("Ferramentas") {
-        FeatureRow(Icons.Default.Face, "Assistente de IA", "Descreva a regra e o Gemini monta, testa e você aplica", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
-        Divider()
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
         Divider()
+        FeatureRow(Icons.Default.Info, "Diagnóstico", "Por que respondeu ou não · IA ${on(c.aiDiagOn)}", null) { open("help") }
+        Divider()
+        FeatureRow(Icons.Default.Face, "Assistente de IA", "Cria regras e testa as regras com o Gemini", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
+        Divider()
         FeatureRow(Icons.Default.Refresh, "Backup", "Exportar e importar configurações e regras", null) { open("backup") }
-        Divider()
-        FeatureRow(Icons.Default.Info, "Diagnóstico", "Testa tudo e mostra por que não respondeu", null) { open("help") }
-        Divider()
-        FeatureRow(Icons.Default.Face, "Diagnóstico pela IA", "O Gemini lê o relatório e explica cada decisão", c.aiDiagOn, { on -> cfg { copy(aiDiagOn = on) } }) { open("help") }
     }
     val ctx = LocalContext.current
     Hint("ZapResponde versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
+}
+
+@Composable
+fun AltScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Oferecer outra carga", c.altOn) { cfg { copy(altOn = it) } }
+    }
+    Panel("Onde procurar (nesta ordem)") {
+        SwitchRow("Saindo da mesma cidade", c.altOrigin, "Pediu Goiânia → Anápolis: oferece outra saindo de Goiânia") { cfg { copy(altOrigin = it) } }
+        SwitchRow("Indo para a mesma cidade", c.altDest, "Oferece outra indo para Anápolis") { cfg { copy(altDest = it) } }
+        SwitchRow("Saindo do mesmo estado", c.altState, "Oferece outra saindo de GO") { cfg { copy(altState = it) } }
+    }
+    Panel("Mensagem") {
+        Field("Texto antes da carga", c.altText, lines = 2, help = "{pedida} = rota pedida · {motivo} = \"saindo de GOIANIA/GO\". Vazio = só a carga.") { cfg { copy(altText = it) } }
+        Hint("Vai uma carga só, a de coleta mais próxima, com a mensagem completa da planilha. Sem nenhuma parecida, vai a mensagem de carga indisponível. Na aba Leads fica \"alternativa\" com a rota oferecida.")
+    }
+}
+
+@Composable
+fun WaitScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Avisar quando a carga aparecer", c.waitOn) { cfg { copy(waitOn = it) } }
+    }
+    Panel("Quando a carga aparecer") {
+        WaitMode.entries.forEach { m ->
+            Row(Modifier.fillMaxWidth().clickable { cfg { copy(waitMode = m) } }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(c.waitMode == m, { cfg { copy(waitMode = m) } })
+                Column {
+                    Text(m.label)
+                    Text(
+                        when (m) {
+                            WaitMode.ASK -> "Notificação com Enviar e Descartar; nada sai sem o seu toque"
+                            WaitMode.AUTO -> "Manda a carga ao motorista e avisa você"
+                            WaitMode.NOTIFY -> "Só avisa você; o app não manda nada"
+                        },
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        NumberField("Esquecer o pedido depois de", c.waitHours, "h") { cfg { copy(waitHours = it.coerceIn(1, 72)) } }
+    }
+    Panel {
+        Hint("Quando um pedido de frete fica sem carga, o app anota o contato e a rota. Cada vez que lê a planilha, confere se a carga apareceu e avisa uma vez só. Se você assumiu a conversa, \"Enviar sozinho\" vira \"Me perguntar antes\". Os avisos vibram.")
+        Hint("Limite do Android: o envio usa o botão Responder da última notificação da conversa. Se o celular reiniciar, o app só avisa e você responde à mão.")
+    }
 }
 
 @Composable
@@ -911,7 +968,7 @@ fun BackupScreen() {
 fun ApprovalScreen() {
     val c = Store.config
     Panel {
-        SwitchRow("Ativar modo aprovação", c.approvalOn) { cfg { copy(approvalOn = it) } }
+        SwitchRow("Aprovar antes de enviar", c.approvalOn) { cfg { copy(approvalOn = it) } }
         Field("Conversas que precisam de aprovação", c.approvalList, lines = 3, help = "Um nome por linha. Vazio = todas as conversas.") { cfg { copy(approvalList = it) } }
     }
     Panel { Hint("O robô prepara a resposta e mostra uma notificação com \"Enviar\" e \"Descartar\". Nada é enviado sem o seu toque.") }
@@ -921,7 +978,7 @@ fun ApprovalScreen() {
 fun FollowScreen() {
     val c = Store.config
     Panel {
-        SwitchRow("Ativar acompanhamento", c.followOn) { cfg { copy(followOn = it) } }
+        SwitchRow("Link do grupo depois da conversa", c.followOn) { cfg { copy(followOn = it) } }
         NumberField("Esperar depois da última mensagem", c.followMin, "min") { cfg { copy(followMin = it.coerceIn(1, 1440)) } }
         Field("Link do grupo", c.followLink, help = "Dados do grupo > Convidar via link > Copiar link. Entra no lugar de {link}.") { cfg { copy(followLink = it.trim()) } }
         Field("Mensagem", c.followText, lines = 5, help = "{link} = link do grupo. Também valem {primeiro_nome}, {nome} e {saudacao}.") { cfg { copy(followText = it) } }
@@ -939,9 +996,9 @@ fun FollowScreen() {
 fun FreteScreen() {
     val c = Store.config
     Panel {
-        SwitchRow("Ativar respostas de fretes", c.freteOn) { cfg { copy(freteOn = it) } }
+        SwitchRow("Respostas de frete", c.freteOn) { cfg { copy(freteOn = it) } }
         SwitchRow(
-            "Entender frete escrito de qualquer jeito", c.freteLivreOn,
+            "Pedido escrito de qualquer jeito", c.freteLivreOn,
             "\"Goiânia para Anápolis\", \"goiania-GO anapolis\", \"tem carga pra Brasília?\": a 1ª cidade é a origem e a 2ª o destino",
         ) { cfg { copy(freteLivreOn = it) } }
         Divider()
@@ -1234,16 +1291,18 @@ private fun diagnose(ctx: android.content.Context): String {
     warn(c.scheduleOn && !Engine.inWindow(c.scheduleHours, c.scheduleDays, LocalDateTime.now()), "Agenda ligada e agora está fora do horário (${c.scheduleHours})")
     warn(c.contactsOn && c.contactsMode != Audience.ALL, "Filtro de contatos ligado: ${AUDIENCE[c.contactsMode]}")
     warn(c.contactsOn && !c.groupsOn, "Respostas em grupos desligadas")
-    warn(c.approvalOn, "Modo aprovação ligado: nada sai sem você tocar em Enviar")
+    warn(c.approvalOn, "Aprovar antes de enviar ligado: nada sai sem você tocar em Enviar")
     val paused = synchronized(Store) { Store.state.chats.filter { it.value.pauseUntil > now }.toMap() }
     warn(paused.isNotEmpty(), "Conversas pausadas: " + paused.entries.joinToString { "${it.key} (até ${fmt(it.value.pauseUntil)})" })
     val follows = synchronized(Store) { Store.state.chats.filter { it.value.followAt > 0 }.toMap() }
     if (follows.isNotEmpty()) l += "ℹ️ Acompanhamentos marcados: " + follows.entries.joinToString { "${it.key} (às ${fmt(it.value.followAt)})" }
     warn(c.followOn && c.followLink.isBlank(), "Acompanhamento ligado sem link do grupo: nada será enviado")
+    val waits = synchronized(Store) { Store.state.waiting.toList() }
+    if (waits.isNotEmpty()) l += "ℹ️ Pedidos esperando carga: " + waits.joinToString { "${it.chat}: ${it.label} (desde ${fmt(it.time)})" }
     l += "ℹ️ Regras ativas: ${Store.allRules().count { it.enabled }} (app ${Store.rules.count { it.enabled }}, planilha ${Store.sheet.rules.count { it.enabled }})"
     fun on(b: Boolean) = if (b) "ligado" else "desligado"
     l += "ℹ️ Recursos: boas-vindas ${on(c.welcomeOn)}, pedido ${on(c.formOn)}, fretes ${on(c.freteOn)}, leads ${on(c.leadsOn)}, " +
-        "alerta ${on(c.alertOn)}, pausa ao assumir ${on(c.takeoverOn)} (${c.takeoverMin} min, ao ler: ${on(c.takeoverOnRead)}), atraso ${on(c.delayOn)}, frete escrito ${on(c.freteLivreOn)}, acompanhamento ${on(c.followOn)} (${c.followMin} min), diagnóstico pela IA ${on(c.aiDiagOn)}"
+        "alerta ${on(c.alertOn)}, pausa ao assumir ${on(c.takeoverOn)} (${c.takeoverMin} min, ao ler: ${on(c.takeoverOnRead)}), atraso ${on(c.delayOn)}, frete escrito ${on(c.freteLivreOn)}, acompanhamento ${on(c.followOn)} (${c.followMin} min), outra carga ${on(c.altOn)}, avisar carga ${on(c.waitOn)} (${c.waitMode.label}), diagnóstico pela IA ${on(c.aiDiagOn)}"
     if (Store.sheet.error.isNotEmpty()) l += "❌ Último erro de sincronização em segundo plano: ${Store.sheet.error}"
 
     l += ""; l += "— Planilha"
@@ -1258,8 +1317,8 @@ private fun diagnose(ctx: android.content.Context): String {
     val box = Store.outbox
     warn(box.historico.size + box.pedidos.size + box.leads.size > 0, "Aguardando envio para a planilha: ${box.historico.size} histórico, ${box.pedidos.size} pedidos, ${box.leads.size} leads")
 
-    l += ""; l += "— Fretes FreteBras"
-    if (!c.freteOn) l += "⚠️ Fretes FreteBras DESLIGADO: anúncios do FreteBras não são respondidos"
+    l += ""; l += "— Fretes"
+    if (!c.freteOn) l += "⚠️ Respostas de frete DESLIGADO: pedidos de frete não são respondidos"
     else when (val t = Engine.freteSelfTest(Store.sheet.consulta)) {
         null -> l += "❌ Nenhuma rota \"Origem/UF para Destino/UF\" na coluna A da planilha de cargas"
         else -> ok(t.second, "Teste com a rota \"${t.first}\": carga encontrada", "Teste com a rota \"${t.first}\": carga NÃO encontrada")
