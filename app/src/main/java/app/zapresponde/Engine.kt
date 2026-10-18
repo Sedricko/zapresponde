@@ -61,6 +61,9 @@ object Engine {
         if (cs.pauseUntil > nowMs) { cs.followAt = 0; return skip("Conversa pausada") }
         // A message equal to something we just sent is our own reply echoed back, in this chat or another WhatsApp on the phone.
         if (state.chats.values.any { c -> c.lastTexts.any { it.trim() == msg.text.trim() } }) return skip("Mensagem é uma resposta nossa")
+        // WhatsApp sometimes posts the same message again (a new notification time); answering it twice looks broken.
+        if (msg.text == cs.lastInText && nowMs - cs.lastInAt < 120_000) return skip("Mensagem repetida em menos de 2 min: já tratada")
+        cs.lastInText = msg.text; cs.lastInAt = nowMs
         t += "✅ Conversa não pausada e mensagem não é eco de resposta nossa"
         if (cfg.loopGuardOn) {
             cs.recentReplies.removeAll { nowMs - it > LOOP_WINDOW }
@@ -110,7 +113,8 @@ object Engine {
                 if (open) "carga achada na planilha" else if (found != null) "carga encerrada (FRETE INDISPONÍVEL)" else "rota fora da planilha"
             if (!open) remember(msg, cfg, state, listOf(route.from), listOf(route.to), route.label, nowMs, t)
             val alt = if (open || !cfg.altOn) null else alternative(listOf(route.from), listOf(route.to), route.label, consulta, now, cfg, t)
-            val reply = alt?.second ?: found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
+            val reply = repeatGuard(cs, nowMs, cfg, t, alt?.second ?: found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha"))
+                ?: return skip("Mesma carga já enviada há pouco")
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), if (alt != null) "Fretes (outra carga)" else "Fretes", null, random).copy(
                 leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(),
                     if (open) "disponível" else if (alt != null) "alternativa: ${alt.first}" else "indisponível"),
@@ -130,7 +134,8 @@ object Engine {
             val ok = f.messages.firstOrNull()?.let { !closed(it) } == true
             if (!ok) remember(msg, cfg, state, f.from, f.to, f.label, nowMs, t)
             val alt = if (ok || !cfg.altOn) null else alternative(f.from, f.to, f.label, consulta, now, cfg, t)
-            val reply = alt?.second ?: f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
+            val reply = repeatGuard(cs, nowMs, cfg, t, alt?.second ?: f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})"))
+                ?: return skip("Mesma carga já enviada há pouco")
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), if (alt != null) "Fretes (outra carga)" else "Fretes (texto livre)", null, random).copy(
                 leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else if (alt != null) "alternativa: ${alt.first}" else "indisponível"),
                 alert = if (ok) "${msg.sender} quer a carga ${f.label}" else alt?.let { "${msg.sender} pediu ${f.label}; ofereci ${it.first}" },
@@ -181,6 +186,18 @@ object Engine {
             if (why.isEmpty()) "Nenhuma regra serviu" else "Nenhuma regra respondeu · " + why.joinToString("; "),
         )
         return finish(msg, now, cfg, cs, nowMs, out, ruleName, formRow, random)
+    }
+
+    /**
+     * The same freight message already went to this chat in the last hour ("Essa Mairinque x Magé ainda disponível?" right
+     * after the load): send the short confirmation instead (null = blank, stay silent).
+     */
+    private fun repeatGuard(cs: ChatState, nowMs: Long, cfg: Config, t: MutableList<String>, reply: String): String? {
+        val again = nowMs - cs.lastBotReply < 3_600_000L && cs.lastTexts.any { it.contains(reply.trim()) }
+        if (!again) return reply
+        t += "ℹ️ Essa mesma mensagem já foi enviada a esta conversa há menos de 1 h: " +
+            if (cfg.freteRepeatText.isBlank()) "não repeti" else "mandei só a confirmação curta"
+        return cfg.freteRepeatText.ifBlank { null }
     }
 
     /** Chats whose Acompanhamento is due. */
@@ -342,6 +359,12 @@ object Engine {
      * Sheet cities named in the message, in order. Each entry holds every city that fits at that spot
      * (the same name can exist in two states); a UF written right after it narrows the choice.
      */
+    /** Whether the message names any city of the freight sheet (for the diagnostic's "request without answer"). */
+    fun mentionsSheetCity(text: String, rows: List<List<String>>): Boolean {
+        val cities = rows.mapNotNull { rowPlaces(it) }.flatMap { p -> listOf(City(words(p[0]), p[1]), City(words(p[2]), p[3])) }.toSet()
+        return citiesIn(text, cities).isNotEmpty()
+    }
+
     private fun citiesIn(text: String, cities: Collection<City>): List<List<City>> {
         val t = words(text)
         val byLength = cities.sortedByDescending { it.words.size }

@@ -351,7 +351,7 @@ class EngineTest {
         assertEquals(listOf("Johon" to "nova carga gyn anapolis • Coleta: Qui 22/10 08:00"), found.map { it.first.chat to it.second })
         assertTrue(st.waiting.isEmpty() && Engine.waitingFound(st, later, monday10, 2_000_000L, 24).isEmpty())
         // Expired after the configured hours.
-        run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, now = 1_000_000L, consulta = sheet)
+        run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, now = 1_200_000L, consulta = sheet)
         assertTrue(Engine.waitingFound(st, later, monday10, 1_000_000L + 25 * 3_600_000L, 24).isEmpty() && st.waiting.isEmpty())
         // "pra Brasília" waits for any load going there.
         val st2 = State()
@@ -379,19 +379,21 @@ class EngineTest {
             LogEntry(now - 3 * min, "Frete Bras - Publicações", "Fretes não publicados", "Respondido (Fretes (texto livre))"),
             LogEntry(now - 4 * min, "Johon", "Que droga", "Nenhuma regra serviu"),
             LogEntry(now - 5 * min, "Ana", "tem carga pra Cuiabá?", "Nenhuma regra serviu", listOf("ℹ️ Frete escrito: não é pedido de frete")),
+            LogEntry(now - 7 * min, "Bia", "Descarga é para que dia ?", "Nenhuma regra serviu"),
         )
+        val sheet = listOf(listOf("x", ""), listOf("Louveira/SP para Cuiabá/MT", "carga"))
         val hist = listOf(HistoryEntry(now - 6 * min, "WhatsApp", "Johon", false, "oi", "❌ *FRETE INDISPONÍVEL*", "Fretes", listOf("✅ passo")))
         val cfg = Config(freteOn = true, freteLivreOn = true, sheetOn = true, sheetUrl = "u", followOn = true)
-        val p = Problems.find(cfg, ev, hist, State(), emptyList(), "", now, 0, now)
+        val p = Problems.find(cfg, ev, hist, State(), sheet, "", now, 0, now)
         val titles = p.map { it.title }
         assertTrue(titles.toString(), p.first().level == 0 && p.first().fix == "exclude:Frete Bras - Publicações")
         assertTrue(titles.toString(), titles.any { it.startsWith("Johon respondeu \"Que droga\"") })
-        assertTrue(titles.toString(), titles.any { "tem carga pra Cuiabá?" in it })
+        assertTrue(titles.toString(), titles.any { "tem carga pra Cuiabá?" in it } && titles.none { "Descarga" in it })
         assertTrue(titles.toString(), titles.any { it.startsWith("Link do grupo ligado sem link") })
         // Already in the exceptions: no longer a problem.
         val cfg2 = cfg.copy(contactsOn = true, contactsMode = Audience.EXCEPT_LIST, contactsList = "Frete Bras - Publicações", followLink = "x")
         assertTrue(Problems.find(cfg2, ev, hist, State(), emptyList(), "", now, 0, now).none { it.fix?.startsWith("exclude:") == true })
-        assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 5 · respondidas: 3 · sem resposta: 2"))
+        assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 6 · respondidas: 3 · sem resposta: 3"))
     }
 
     @Test fun novidadeNaoEPedido() {
@@ -406,5 +408,24 @@ class EngineTest {
         assertEquals(listOf("carga rio verde • Coleta: Ter 20/10 08:00"), Engine.freteLivre("boa tarde, tem alguma carga para rio verde?", sheet)!!.messages)
         assertEquals(listOf("carga rio verde • Coleta: Ter 20/10 08:00"), run(msg("Goiânia para Rio Verde"), listOf(rule), cfg, consulta = sheet).replies)
         assertEquals(null, Engine.freteBlocked("tem carga pra Rio Verde?", cfg.freteBlock))
+    }
+
+    @Test fun naoRepetir() {
+        val sheet = listOf(listOf("x", ""), listOf("Mairinque/SP para Magé/RJ", "carga mairinque mage • Coleta: Sáb 31/10 11:00"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true)
+        val rule = Rule(match = Match.ALL, enabled = false)
+        val st = State()
+        val ad = "Olá, sou Sergio Alves e estou disponível para carregar seu frete de Mairinque/SP para Magé/RJ de ALIMENTICIO."
+        assertEquals(listOf("carga mairinque mage • Coleta: Sáb 31/10 11:00"), run(msg(ad, sender = "Sergio"), listOf(rule), cfg, state = st, now = 1_000_000L, consulta = sheet).replies)
+        // 17:39 "Essa Mairinque x Magé ainda disponível": short confirmation, not the whole load again.
+        assertEquals(listOf(cfg.freteRepeatText), run(msg("Essa Mairinque x Magé ainda disponível", sender = "Sergio"), listOf(rule), cfg, state = st, now = 1_060_000L, consulta = sheet).replies)
+        // Blank text: stay silent.
+        assertTrue(run(msg("Mairinque para Magé?", sender = "Sergio"), listOf(rule), cfg.copy(freteRepeatText = ""), state = st, now = 1_120_000L, consulta = sheet).replies.isEmpty())
+        // After an hour the load goes again.
+        assertEquals(listOf("carga mairinque mage • Coleta: Sáb 31/10 11:00"), run(msg("Mairinque para Magé", sender = "Sergio"), listOf(rule), cfg, state = st, now = 1_060_000L + 3_700_000L, consulta = sheet).replies)
+        // The same notification seen twice within 2 min is handled once.
+        val st2 = State()
+        run(msg("Mairinque para Magé", sender = "Ana"), listOf(rule), cfg, state = st2, now = 1_000_000L, consulta = sheet)
+        assertEquals("Mensagem repetida em menos de 2 min: já tratada", run(msg("Mairinque para Magé", sender = "Ana"), listOf(rule), cfg, state = st2, now = 1_030_000L, consulta = sheet).reason)
     }
 }

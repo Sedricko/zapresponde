@@ -16,7 +16,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -190,10 +190,21 @@ fun App() {
     var newRule by remember { mutableStateOf(false) }
     // One scroll position per tab, kept while a detail screen is open, so "back" returns to the same spot.
     val scrolls = remember { HashMap<String, ScrollState>() }
-    BackHandler(sub.isNotEmpty() || tab != "home") { if (sub.isNotEmpty()) sub = "" else tab = "home" }
+    BackHandler(sub.isNotEmpty() || tab != "home") { if (sub == "contactpick") sub = "contacts" else if (sub.isNotEmpty()) sub = "" else tab = "home" }
     val open: (String) -> Unit = { sub = it }
     val bar = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
 
+    if (sub == "contactpick") {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Escolher contatos") }, colors = bar,
+                    navigationIcon = { IconButton({ sub = "contacts" }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar") } },
+                )
+            },
+        ) { pad -> ContactPicker(pad) { sub = "contacts" } }
+        return
+    }
     if (sub.isNotEmpty()) {
         val ruleId = sub.removePrefix("rule:").takeIf { sub.startsWith("rule:") }
         Scaffold(
@@ -214,7 +225,7 @@ fun App() {
                     "header" -> HeaderScreen()
                     "takeover" -> TakeoverScreen()
                     "loop" -> LoopScreen()
-                    "contacts" -> ContactsScreen()
+                    "contacts" -> ContactsScreen(open)
                     "backup" -> BackupScreen()
                     "approval" -> ApprovalScreen()
                     "frete" -> FreteScreen()
@@ -949,11 +960,10 @@ val AUDIENCE = mapOf(
 )
 
 @Composable
-fun ContactsScreen() {
+fun ContactsScreen(open: (String) -> Unit) {
     val c = Store.config
     val ctx = LocalContext.current
-    var picking by remember { mutableStateOf(false) }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { if (it) picking = true }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { if (it) open("contactpick") }
     val list = c.contactsList.lines().map { it.trim() }.filter { it.isNotEmpty() }
     fun save(l: List<String>) = cfg { copy(contactsList = l.distinct().joinToString("\n")) }
 
@@ -970,7 +980,7 @@ fun ContactsScreen() {
         if (c.contactsMode == Audience.EXCEPT_PHONE && !Contacts.allowed(ctx)) Hint("Sem acesso aos contatos, o app considera salvo quem aparece com nome em vez de número.")
     }
     Panel("Lista de contatos (${list.size})") {
-        Button({ if (Contacts.allowed(ctx)) picking = true else ask.launch(Manifest.permission.READ_CONTACTS) }, Modifier.fillMaxWidth()) {
+        Button({ if (Contacts.allowed(ctx)) open("contactpick") else ask.launch(Manifest.permission.READ_CONTACTS) }, Modifier.fillMaxWidth()) {
             Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Escolher dos contatos do telefone")
         }
         var typed by remember { mutableStateOf("") }
@@ -986,45 +996,40 @@ fun ContactsScreen() {
         }
         if (list.isEmpty()) Hint("Nenhum contato na lista.")
     }
-    if (picking) ContactPicker(list, { picking = false }) { save(it); picking = false }
 }
 
 /** Full-screen list of the phone's contacts with search and checkboxes. */
 @Composable
-private fun ContactPicker(selected: List<String>, dismiss: () -> Unit, done: (List<String>) -> Unit) {
+private fun ContactPicker(pad: PaddingValues, done: () -> Unit) {
     val ctx = LocalContext.current
+    val selected = remember { Store.config.contactsList.lines().map { it.trim() }.filter { it.isNotEmpty() } }
     var all by remember { mutableStateOf<List<String>?>(null) }
     LaunchedEffect(Unit) { all = withContext(Dispatchers.IO) { Contacts.all(ctx) } }
     var query by remember { mutableStateOf("") }
     val chosen = remember { mutableStateListOf<String>().apply { addAll(selected) } }
-    // decorFitsSystemWindows = false hands the bar sizes to Compose; safeDrawingPadding then keeps the buttons above them.
-    Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Surface(Modifier.fillMaxSize()) {
-            // Android 15 draws under the status and navigation bars; without this the bottom buttons hide behind them.
-            Column(Modifier.safeDrawingPadding().padding(16.dp)) {
-                Text("Escolher contatos (${chosen.size})", style = MaterialTheme.typography.titleLarge)
-                Field("Buscar", query) { query = it }
-                val q = Engine.normalize(query)
-                val shown = all.orEmpty().filter { q.isEmpty() || Engine.normalize(it).contains(q) }
-                if (all == null) Hint("Carregando contatos...")
-                LazyColumn(Modifier.weight(1f)) {
-                    items(shown) { name ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { if (name in chosen) chosen.remove(name) else chosen.add(name) },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(name in chosen, { if (it) chosen.add(name) else chosen.remove(name) })
-                            Text(name)
-                        }
-                    }
+    fun finish() { cfg { copy(contactsList = chosen.distinct().joinToString("\n")) }; done() }
+    // A normal screen inside the Scaffold: its padding already keeps clear of the status and navigation bars.
+    Column(Modifier.fillMaxSize().padding(pad).imePadding().padding(horizontal = 16.dp)) {
+        Field("Buscar", query) { query = it }
+        val q = Engine.normalize(query)
+        val shown = all.orEmpty().filter { q.isEmpty() || Engine.normalize(it).contains(q) }
+        if (all == null) Hint("Carregando contatos...")
+        LazyColumn(Modifier.weight(1f)) {
+            items(shown) { name ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { if (name in chosen) chosen.remove(name) else chosen.add(name) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(name in chosen, { if (it) chosen.add(name) else chosen.remove(name) })
+                    Text(name)
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton({ chosen.removeAll(shown) }) { Text("Desmarcar visíveis") }
-                    TextButton({ chosen.addAll(shown.filter { it !in chosen }) }) { Text("Marcar visíveis") }
-                }
-                Button({ done(chosen.toList()) }, Modifier.fillMaxWidth()) { Text("Concluir (${chosen.size})") }
             }
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton({ chosen.removeAll(shown) }) { Text("Desmarcar visíveis") }
+            TextButton({ chosen.addAll(shown.filter { it !in chosen }) }) { Text("Marcar visíveis") }
+        }
+        Button({ finish() }, Modifier.fillMaxWidth().padding(bottom = 8.dp)) { Text("Concluir (${chosen.size})") }
     }
 }
 
@@ -1135,6 +1140,7 @@ fun FreteScreen() {
         SwitchRow("Gravar na aba Leads", c.leadsOn, "Data, motorista, rota, carga e se estava disponível") { cfg { copy(leadsOn = it) } }
         SwitchRow("Alerta de carga pedida", c.alertOn, "Notificação no celular quando a carga pedida está disponível; tocar abre a conversa") { cfg { copy(alertOn = it) } }
         Divider()
+        Field("Se pedirem a mesma carga de novo (até 1 h)", c.freteRepeatText, lines = 2, maxLines = 4, help = "Vai no lugar da carga repetida. Vazio = não responde.") { cfg { copy(freteRepeatText = it) } }
         Field("Quando a carga não estiver na planilha", c.freteNotFound, lines = 5, help = "Deixe vazio para não responder.") { cfg { copy(freteNotFound = it) } }
     }
     Panel {

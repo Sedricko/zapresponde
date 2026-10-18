@@ -93,6 +93,8 @@ data class Config(
     val approvalOn: Boolean = false,
     /** One name per line; empty = every chat waits for approval. */
     val approvalList: String = "",
+    /** Sent instead of the same load again to the same chat within an hour; blank = stay silent. */
+    val freteRepeatText: String = "✅ Sim, essa carga ainda está disponível. Os detalhes estão na mensagem acima.",
     val freteNotFound: String = "❌ *FRETE INDISPONÍVEL*\n\nEsta carga já foi fechada ou expirou. Confira novas oportunidades no grupo oficial:\n🔗 (cole aqui o link do grupo)",
     val sheetOn: Boolean = false,
     val sheetUrl: String = "",
@@ -144,6 +146,9 @@ class ChatState(
     /** Acompanhamento: when to send it (0 = nothing pending) and whether this contact already got it or is in the group. */
     var followAt: Long = 0,
     var followDone: Boolean = false,
+    /** Last message handled in this chat, to drop the same notification seen twice. */
+    var lastInText: String = "",
+    var lastInAt: Long = 0,
 )
 
 /** A freight request that found no active load: [from]/[to] are city keys (empty = any), [label] is for people. */

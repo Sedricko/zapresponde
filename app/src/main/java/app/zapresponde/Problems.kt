@@ -38,10 +38,17 @@ object Problems {
         replied.groupBy { it.chat }.forEach { (chat, l) ->
             val times = l.map { it.time }.sorted()
             val burst = times.indices.any { i -> times.count { it in times[i]..(times[i] + 10 * MIN) } >= 3 }
-            if (burst && !excluded(cfg, chat)) out += Problem(
-                0, "$chat recebeu ${l.size} respostas em pouco tempo",
-                "3 ou mais respostas em 10 minutos para a mesma conversa costuma ser outro robô ou um canal de avisos. " +
-                    "Colocar nas exceções faz o app parar de responder ali.", "exclude:$chat",
+            if (!burst || excluded(cfg, chat)) return@forEach
+            // A robot repeats itself; a person (or you testing) writes different things. Only the first is grave.
+            val texts = day.filter { it.chat == chat }.map { Engine.normalize(it.text) }.filter { it.isNotEmpty() }
+            val robotish = texts.size - texts.distinct().size >= 2 || BOT_NAME.any { Engine.normalize(chat).contains(it) }
+            out += if (robotish) Problem(
+                0, "$chat recebeu ${l.size} respostas em pouco tempo e repete as mesmas mensagens",
+                "Mensagens iguais repetidas e muitas respostas costumam ser outro robô ou um canal de avisos. Colocar nas exceções faz o app parar de responder ali.",
+                "exclude:$chat",
+            ) else Problem(
+                1, "$chat recebeu ${l.size} respostas em pouco tempo",
+                "Se foi um teste seu ou uma conversa longa, está tudo bem. Se for um robô, coloque nas exceções.", "exclude:$chat",
             )
         }
         day.filter { it.result.startsWith("Proteção contra loop") }.map { it.chat }.distinct().forEach { chat ->
@@ -65,7 +72,11 @@ object Problems {
 
         // Looks like a freight request but nothing answered it.
         val cityWords = Regex("""\b(para|pra|carga|cargas|frete|fretes)\b""")
-        day.filter { it.result.startsWith("Nenhuma regra") && cityWords.containsMatchIn(Engine.normalize(it.text)) }.take(5).forEach { e ->
+        // Only messages naming a city of the sheet: "Descarga é para que dia?" is a question about a load, not a request.
+        day.filter {
+            it.result.startsWith("Nenhuma regra") && cityWords.containsMatchIn(Engine.normalize(it.text)) &&
+                !Regex("origem:|lista de cargas").containsMatchIn(Engine.normalize(it.text)) && Engine.mentionsSheetCity(it.text, sheet)
+        }.take(5).forEach { e ->
             val why = e.trace.lastOrNull { "Frete" in it || "frete" in it }?.trim().orEmpty()
             out += Problem(
                 1, "Possível pedido de frete sem resposta: \"${e.text.take(50)}\" (${e.chat})",
