@@ -1,6 +1,6 @@
 # ZapResponde: contexto para continuar o trabalho
 
-Atualizado em 18/10/2026, app 0.9.5 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
+Atualizado em 18/10/2026, app 0.9.6 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
 
 ## O que é
 App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao WhatsApp Business automaticamente, lendo as notificações. Ele se integra ao Google Sheets por um Apps Script colado na planilha. Dono: William (Transportes Poloni, cargas e fretes). A comunicação é sempre em português.
@@ -69,6 +69,7 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
 ## Estado e pendências (18/10/2026)
 - 0.9.4 (aguardando teste no celular): `Health.kt` guarda conexão/desconexão do serviço e últimas notificações; o serviço pede reconexão sozinho; Diagnóstico mostra aparelho, recursos, erro de sincronização e "CAUSA MAIS PROVÁVEL"; Início mostra "Ligado, sem conexão"; motivo detalhado quando nenhuma regra responde; sincronização com trava única; frete lê a planilha com timeout de 8 s. Script 0.9.3: só grava nas abas do app e como texto puro.
 - 0.9.5: **Assistente de IA** (Ajustes > Ferramentas, vem desligado). `Assistant.kt` manda o pedido + esquema da `Rule` ao Gemini (`gemini-flash-latest`, chave em `Config.aiKey`, fora do backup), lê a regra, confere valores, testa os exemplos com `Engine.matches` e só grava quando o William toca em Aplicar. Pedidos seguintes ajustam a regra atual. Outros provedores (Claude, OpenAI) ficam para depois.
+- 0.9.6: Assistente tenta de novo e troca de modelo sozinho (gemini-flash-latest, flash-lite-latest, 2.5-flash, 2.5-flash-lite) em erro 5xx, 429 ou 404. O William recebeu 503 (Gemini sobrecarregado) no primeiro teste.
 - Estado de uma resposta só é devolvido se o envio falhar ou se você descartar a aprovação, nunca no cancelamento por mensagem nova (isso apagava a pausa de quando você assume). "Respondido" só vai para o registro depois do envio.
 - Testado no celular: respostas, boas-vindas, regras, gravação do Historico na planilha e Fretes (a primeira mensagem FreteBras foi respondida). A planilha de cargas está ligada, com 164 linhas.
 - Último problema: dois anúncios só com link ficaram sem resposta. A causa provável é o WhatsApp Web aberto (sem notificação no celular) ou a conversa pausada. Pedi para ele rodar o Diagnóstico e mandar o relatório.

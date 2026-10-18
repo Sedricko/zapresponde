@@ -81,9 +81,29 @@ object Assistant {
     /** Confere cada exemplo só pelas palavras (horário, contatos e frequência dependem da hora e de quem manda). */
     fun check(d: Draft): List<Pair<Example, Boolean>> = d.examples.map { it to (Engine.matches(d.rule, it.text) == it.shouldReply) }
 
-    /** Chama o Gemini e devolve o texto da resposta. */
+    /** Modelos tentados depois do escolhido, quando ele está sobrecarregado, sem cota ou não existe. */
+    private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
+
+    private class Retry(msg: String) : Exception(msg)
+
+    /** Chama o Gemini e devolve o texto da resposta, tentando de novo e trocando de modelo quando o Google está ocupado. */
     fun gemini(key: String, model: String, prompt: String): String {
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/${model.trim()}:generateContent"
+        var last = "O Gemini não respondeu."
+        for (m in (listOf(model.trim()) + FALLBACK).filter { it.isNotEmpty() }.distinct()) {
+            repeat(2) { attempt ->
+                try {
+                    return call(key, m, prompt)
+                } catch (e: Retry) {
+                    last = e.message.orEmpty()
+                    if (attempt == 0 && "sobrecarregado" in last) Thread.sleep(2_000) else return@repeat
+                }
+            }
+        }
+        error(last)
+    }
+
+    private fun call(key: String, model: String, prompt: String): String {
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
         val body = buildJsonObject {
             putJsonArray("contents") { addJsonObject { put("role", "user"); putJsonArray("parts") { addJsonObject { put("text", prompt) } } } }
             putJsonObject("generationConfig") { put("responseMimeType", "application/json"); put("temperature", 0.2) }
@@ -99,8 +119,9 @@ object Assistant {
         when {
             code == 400 && "API key" in text -> error("Chave do Gemini inválida. Confira em Ajustes > Assistente de IA.")
             code == 403 -> error("A chave do Gemini não tem permissão (403). Crie outra em aistudio.google.com/apikey.")
-            code == 404 -> error("Modelo \"$model\" não encontrado. Use gemini-flash-latest.")
-            code == 429 -> error("Limite de uso do Gemini atingido. Espere um pouco e tente de novo.")
+            code == 404 -> throw Retry("Nenhum modelo do Gemini foi encontrado para essa chave.")
+            code == 429 -> throw Retry("Limite de uso grátis do Gemini atingido. Espere alguns minutos e tente de novo.")
+            code >= 500 -> throw Retry("O Gemini está sobrecarregado agora (erro $code). Tente de novo em alguns minutos.")
             code >= 400 -> error("O Gemini respondeu com erro $code.")
         }
         val o = json.parseToJsonElement(text).jsonObject
