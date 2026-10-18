@@ -71,7 +71,8 @@ class ReplyService : NotificationListenerService() {
         }
         for ((w, load) in found) {
             val r = lastReply[w.chat]
-            if (r != null && cfg.contactsOn) Engine.audience(r.msg, cfg, Contacts.names(this))?.let { Store.log(w.chat, "", "Aviso de carga cancelado: $it"); continue }
+            val blocked = if (r != null && cfg.contactsOn) Engine.audience(r.msg, cfg, Contacts.names(this)) else null
+            if (blocked != null) { Store.log(w.chat, "", "Aviso de carga cancelado: $blocked"); continue }
             val paused = (Store.state.chats[w.chat]?.pauseUntil ?: 0) > now
             val asked = "${w.chat} pediu ${w.label} às ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(w.time))}"
             if (r == null || cfg.waitMode == WaitMode.NOTIFY) {
@@ -107,7 +108,8 @@ class ReplyService : NotificationListenerService() {
             if (r == null) { Store.log(chat, "", "Acompanhamento não enviado: o app foi reiniciado e perdeu o botão Responder desta conversa"); continue }
             val msg = r.msg; val action = r.action; val pkg = r.pkg
             // The contact filter may have changed since the conversation (e.g. a bot chat added to the exceptions).
-            if (cfg.contactsOn) Engine.audience(msg, cfg, Contacts.names(this))?.let { Store.log(chat, "", "Acompanhamento cancelado: $it"); continue }
+            val blocked = if (cfg.contactsOn) Engine.audience(msg, cfg, Contacts.names(this)) else null
+            if (blocked != null) { Store.log(chat, "", "Acompanhamento cancelado: $blocked"); continue }
             if (!cfg.followOn || cfg.followLink.isBlank()) { Store.log(chat, "", "Acompanhamento não enviado: função desligada ou sem link do grupo"); continue }
             val text = synchronized(Store) {
                 val cs = Store.state.chats.getOrPut(chat) { ChatState() }
