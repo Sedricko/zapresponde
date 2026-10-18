@@ -87,7 +87,7 @@ object Sheets {
 
     fun refresh(cfg: Config, fast: Boolean = false) {
         val (respostas, consulta) = read(cfg, fast)
-        Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), consulta, System.currentTimeMillis()))
+        Store.updateSheet(SheetCache(Engine.rulesFromSheet(respostas), Engine.keepLoads(Store.sheet.consulta, consulta), System.currentTimeMillis()))
     }
 
     fun historyRow(e: HistoryEntry) = listOf(

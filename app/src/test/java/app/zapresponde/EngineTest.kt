@@ -260,6 +260,24 @@ class EngineTest {
         val st = State()
         val sent = run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, consulta = sheet).replies[0]
         assertEquals("Mensagem é uma resposta nossa", run(msg(sent, sender = "Você"), listOf(rule), cfg, state = st, consulta = sheet).reason)
+        // Closed loads (the sheet script writes "❌ *FRETE INDISPONÍVEL*") go last and are not "disponível" in Leads nor alerted.
+        val off = "❌ *FRETE INDISPONÍVEL*\n\nEsta carga já foi fechada ou expirou."
+        val mixed = listOf(
+            listOf("🟢 ONLINE", ""),
+            listOf("Serra/ES para Caratinga/MG", off),
+            listOf("Serra/ES para Caratinga/MG", "🚛 *FRETE DISPONÍVEL*\n• Coleta: A combinar"),
+            listOf("Mucuri/BA para Serra/ES", off),
+        )
+        val active = run(msg("Serra para Caratinga"), listOf(rule), cfg, consulta = mixed)
+        assertTrue(active.replies[0].contains("FRETE DISPONÍVEL") && active.alert != null && active.leadRow!![3] == "disponível")
+        val gone = run(msg("Mucuri para Serra"), listOf(rule), cfg, consulta = mixed)
+        assertTrue(gone.replies[0].contains("INDISPONÍVEL") && gone.alert == null && gone.leadRow!![3] == "indisponível")
+        assertTrue(gone.trace.any { "0 carga(s) ativa(s) e 1 encerrada(s)" in it })
+        val fb = run(msg("estou disponível para carregar seu frete de Mucuri/BA para Serra/ES"), listOf(rule), cfg, consulta = mixed)
+        assertTrue(fb.alert == null && fb.leadRow!![3] == "indisponível" && fb.trace.any { "carga encerrada" in it })
+        // A read while the script rewrites the tab (only status lines) keeps the last good copy.
+        assertEquals(mixed, Engine.keepLoads(mixed, listOf(listOf("🟢 ONLINE", ""), listOf("📂 Resumo", ""))))
+        assertEquals(sheet, Engine.keepLoads(mixed, sheet))
         val tr = run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).trace
         assertTrue(tr.toString(), tr.any { "Frete escrito: entendi GOIANIA/GO → ANAPOLIS/GO, 1 carga" in it })
         val tr2 = run(msg("oi"), listOf(rule.copy(name = "Oi", match = Match.CONTAINS, keywords = "tchau"), rule.copy(name = "Tudo")), cfg, consulta = sheet).trace

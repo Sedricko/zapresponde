@@ -91,22 +91,24 @@ object Engine {
         if (!cfg.freteOn) t += "ℹ️ Fretes desligado"
         if (cfg.freteOn) freteRoute(msg.text)?.let { route ->
             val found = freteMessage(route, consulta, now)
-            t += "✅ Anúncio FreteBras, rota ${route.label}: " + if (found != null) "carga achada na planilha" else "rota fora da planilha"
+            val open = found != null && !closed(found)
+            t += "✅ Anúncio FreteBras, rota ${route.label}: " +
+                if (open) "carga achada na planilha" else if (found != null) "carga encerrada (FRETE INDISPONÍVEL)" else "rota fora da planilha"
             val reply = found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes", null, random).copy(
-                leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(), if (found != null) "disponível" else "indisponível"),
-                alert = if (found != null) "${msg.sender} quer a carga ${route.label}" else null,
+                leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(), if (open) "disponível" else "indisponível"),
+                alert = if (open) "${msg.sender} quer a carga ${route.label}" else null,
             )
         }
         if (cfg.freteOn) t += "ℹ️ Não é anúncio FreteBras"
         if (cfg.freteOn && !cfg.freteLivreOn) t += "ℹ️ Frete escrito de qualquer jeito desligado"
         if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta, now).also { f ->
             t += if (f == null) "ℹ️ Frete escrito: não é pedido de frete (nenhuma cidade da planilha, anúncio de carga, ou uma cidade só sem \"para\"/\"carga\")"
-            else "✅ Frete escrito: entendi ${f.label}, ${f.messages.size} carga(s) na planilha" +
+            else "✅ Frete escrito: entendi ${f.label}, ${f.messages.count { !closed(it) }} carga(s) ativa(s) e ${f.messages.count(::closed)} encerrada(s) na planilha" +
                 if (f.messages.size > 1) "; mandei só a de coleta mais próxima" else ""
         }?.let { f ->
             val reply = f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
-            val ok = f.messages.isNotEmpty()
+            val ok = f.messages.firstOrNull()?.let { !closed(it) } == true
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes (texto livre)", null, random).copy(
                 leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else "indisponível"),
                 alert = if (ok) "${msg.sender} quer a carga ${f.label}" else null,
@@ -344,11 +346,24 @@ object Engine {
         }.getOrNull()
     }
 
-    /** Loads picking up from today on come first, soonest first; then past ones, latest first; then rows without a date. */
+    /** A load the sheet script marked as closed or cancelled: its message is the fixed "❌ FRETE INDISPONÍVEL". */
+    fun closed(message: String) = normalize(message).contains("frete indisponivel")
+
+    /**
+     * The sheet script clears the whole tab and writes it again every minute; a read in between comes back with only the
+     * status lines. Then keep the last good copy, so a load that exists is not answered as "indisponível".
+     */
+    fun keepLoads(old: List<List<String>>, new: List<List<String>>): List<List<String>> {
+        fun filled(rows: List<List<String>>) = rows.count { r -> r.any { it.isNotBlank() } }
+        return if (filled(new) <= 2 && filled(old) > 2) old else new
+    }
+
+    /** Loads picking up from today on come first, soonest first; then past ones, latest first; then rows without a date; closed loads last. */
     fun nearestFirst(rows: List<List<String>>, now: LocalDateTime): List<List<String>> {
         val today = now.toLocalDate().atStartOfDay()
         return rows.sortedWith(compareBy { row ->
-            val d = loadDate(row, now) ?: return@compareBy Long.MAX_VALUE
+            if (closed(ready(row))) return@compareBy Long.MAX_VALUE
+            val d = loadDate(row, now) ?: return@compareBy Long.MAX_VALUE - 1
             val min = java.time.Duration.between(today, d).toMinutes()
             if (min >= 0) min else Long.MAX_VALUE / 2 - min
         })
