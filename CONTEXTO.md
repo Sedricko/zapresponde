@@ -1,6 +1,6 @@
 # ZapResponde: contexto para continuar o trabalho
 
-Atualizado em 18/10/2026, app 0.9.10 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
+Atualizado em 18/10/2026, app 0.9.11 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
 
 ## O que é
 App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao WhatsApp Business automaticamente, lendo as notificações. Ele se integra ao Google Sheets por um Apps Script colado na planilha. Dono: William (Transportes Poloni, cargas e fretes). A comunicação é sempre em português.
@@ -74,6 +74,7 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
 - 0.9.8: frete escrito de qualquer jeito ignora anúncio de carga (texto com ORIGEM: e DESTINO:). "Você" e "Meu" no mesmo celular respondiam um ao outro com os anúncios até a proteção contra loop parar.
 - 0.9.9: **caminho da decisão** (`Decision.trace`, guardado em `LogEntry.trace`): cada passo do `decide` (filtros, fretes, cada regra que casou ou não e por quê). O Diagnóstico mostra o caminho das 5 últimas mensagens. **Diagnóstico pela IA** (`aiDiagOn`, desligado; Ajustes > Ferramentas e tela Diagnóstico): manda relatório + ajustes + regras ao Gemini (`Assistant.diagnosisPrompt`, sem aiKey, sheetUrl e sheetKey; texto das mensagens vai junto) e mostra a explicação.
 - 0.9.10: fretes (FreteBras e texto livre) mandam **uma carga só**, a de coleta mais próxima (`Engine.nearestFirst`/`loadDate`, lê "Coleta: dd/mm hh:mm"; de hoje em diante primeiro, depois as passadas, por último sem data). Pedido do William: a lista de até 3 poluía a conversa. Eco: mensagem igual a qualquer resposta nossa recente, em qualquer conversa, é ignorada (a resposta ao Johon voltava como mensagem do "Você"). Gemini: timeout de 120 s, e no timeout tenta o próximo modelo.
+- 0.9.11: **Testar regras com a IA** (Assistente de IA, embaixo; usa aiOn): escolhe as regras ativas (todas marcadas), o Gemini cria mensagens e diz qual regra deveria responder (`rulesTestPrompt`/`parseRuleTests`), o app confere pela ordem real com `Engine.matches` (`runRuleTests`) e mostra o que não bateu + observações da IA. Só as regras vão ao Gemini.
 - Estado de uma resposta só é devolvido se o envio falhar ou se você descartar a aprovação, nunca no cancelamento por mensagem nova (isso apagava a pausa de quando você assume). "Respondido" só vai para o registro depois do envio.
 - Testado no celular: respostas, boas-vindas, regras, gravação do Historico na planilha e Fretes (a primeira mensagem FreteBras foi respondida). A planilha de cargas está ligada, com 164 linhas.
 - Último problema: dois anúncios só com link ficaram sem resposta. A causa provável é o WhatsApp Web aberto (sem notificação no celular) ou a conversa pausada. Pedi para ele rodar o Diagnóstico e mandar o relatório.

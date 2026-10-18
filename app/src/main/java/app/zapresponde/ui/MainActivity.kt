@@ -1005,6 +1005,63 @@ fun AssistantScreen() {
         }
         if (d.problems.isEmpty() && !results.all { it.second }) Hint("Algum teste não bateu: o melhor é pedir um ajuste antes de aplicar.")
     }
+    RuleTestPanel()
+}
+
+/** A IA cria mensagens para as regras escolhidas; o app confere qual regra responde cada uma e mostra o que não bateu. */
+@Composable
+private fun RuleTestPanel() {
+    val c = Store.config
+    val scope = rememberCoroutineScope()
+    val active = Store.allRules().filter { it.enabled }
+    var picked by remember { mutableStateOf(active.map { it.id }.toSet()) }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<Pair<List<Pair<Assistant.RuleTest, String>>, List<String>>?>(null) }
+    if (active.isEmpty()) { Panel("Testar regras com a IA") { Hint("Nenhuma regra ativa para testar.") }; return }
+    Panel("Testar regras com a IA") {
+        Hint("Escolha as regras. A IA inventa mensagens de clientes e o app confere qual regra responderia cada uma, na ordem real. Só as regras vão ao Gemini.")
+        active.forEach { r ->
+            Row(Modifier.fillMaxWidth().clickable { picked = if (r.id in picked) picked - r.id else picked + r.id }, verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(r.id in picked, { picked = if (it) picked + r.id else picked - r.id })
+                Text(r.name)
+            }
+        }
+        Button({
+            busy = true; status = "Pedindo testes ao Gemini..."; result = null
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val (tests, notes) = Assistant.parseRuleTests(
+                            Assistant.gemini(c.aiKey, c.aiModel, Assistant.rulesTestPrompt(active.filter { it.id in picked }, active)),
+                        )
+                        Assistant.runRuleTests(tests, active) to notes
+                    }
+                }.fold({ result = it; status = "" }, { status = it.message ?: "Falhou: tente de novo." })
+                busy = false
+            }
+        }, Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank() && picked.isNotEmpty() && !busy) {
+            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Testar ${picked.size} regra(s)")
+        }
+        if (status.isNotEmpty()) Text(status, color = if (busy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        result?.let { (tests, notes) ->
+            val ok = tests.count { (t, got) -> t.expected.trim().equals(got, true) }
+            Text("$ok de ${tests.size} testes bateram", fontWeight = FontWeight.Bold)
+            tests.forEach { (t, got) ->
+                val pass = t.expected.trim().equals(got, true)
+                Text(
+                    "${if (pass) "✅" else "❌"} \"${t.text}\" → " + got.ifEmpty { "nenhuma regra" } +
+                        if (pass) "" else " (esperado: ${t.expected.ifEmpty { "nenhuma regra" }})",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (notes.isNotEmpty()) {
+                Text("Observações da IA", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                notes.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+            }
+            Hint("O teste confere as palavras e a ordem das regras. Horário, contatos e frequência valem quando a mensagem real chegar.")
+        }
+    }
 }
 
 @Composable

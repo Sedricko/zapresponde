@@ -82,6 +82,43 @@ object Assistant {
     /** Confere cada exemplo só pelas palavras (horário, contatos e frequência dependem da hora e de quem manda). */
     fun check(d: Draft): List<Pair<Example, Boolean>> = d.examples.map { it to (Engine.matches(d.rule, it.text) == it.shouldReply) }
 
+    /** Mensagem de teste e o nome da regra que deveria responder ("" = nenhuma). */
+    data class RuleTest(val text: String, val expected: String)
+
+    /** Pede à IA mensagens de teste para as regras [selected], sabendo de todas as [active] (a primeira que casa responde). Só as regras vão ao Gemini. */
+    fun rulesTestPrompt(selected: List<Rule>, active: List<Rule>): String = buildString {
+        append("""
+            Você testa regras de resposta automática do WhatsApp no app ZapResponde.
+            As regras ativas estão abaixo na ordem em que o app as confere: a PRIMEIRA que casar responde, as outras não.
+            Comparações (sem acento e sem maiúscula): CONTAINS casa palavra inteira; EXACT a mensagem inteira; STARTS/ENDS começo/fim;
+            SIMILAR parecida pelo percentual "similarity"; WILDCARD com * e // separando padrões; REGEX; ALL qualquer mensagem; "exclude" impede.
+            Para cada regra a testar, crie de 3 a 5 mensagens reais de clientes que DEVEM ser respondidas por ela (com variações, erros comuns, acento ou não)
+            e 1 ou 2 parecidas que NÃO devem ser respondidas por ela. Diga qual regra deveria responder cada mensagem, pelo nome exato, ou "" para nenhuma.
+            Em "observacoes", aponte problemas que você vê só lendo as regras: palavras que pegam mensagens demais, regras que se atropelam pela ordem,
+            regra que nunca vai responder, palavras faltando. Português simples, sem markdown.
+            Responda só com JSON: {"testes": [{"mensagem": "...", "regra": "nome ou vazio"}], "observacoes": ["..."]}
+        """.trimIndent())
+        append("\n\nRegras a testar: ").append(selected.joinToString { "\"${it.name}\"" })
+        append("\n\nTodas as regras ativas, em ordem:\n").append(json.encodeToString(ListSerializer(Rule.serializer()), active))
+    }
+
+    /** Lê os testes e as observações devolvidos pela IA. */
+    fun parseRuleTests(text: String): Pair<List<RuleTest>, List<String>> {
+        val start = text.indexOf('{'); val end = text.lastIndexOf('}')
+        val o = runCatching { json.parseToJsonElement(text.substring(start, end + 1)).jsonObject }
+            .getOrElse { throw IllegalArgumentException("A IA devolveu um texto que não deu para ler. Tente de novo.") }
+        val tests = (o["testes"] as? JsonArray).orEmpty().mapNotNull { e ->
+            runCatching { RuleTest(e.jsonObject["mensagem"]!!.jsonPrimitive.content, e.jsonObject["regra"]?.jsonPrimitive?.content.orEmpty()) }.getOrNull()
+        }
+        require(tests.isNotEmpty()) { "A IA não mandou testes. Tente de novo." }
+        val notes = (o["observacoes"] as? JsonArray).orEmpty().mapNotNull { runCatching { it.jsonPrimitive.content }.getOrNull() }
+        return tests to notes
+    }
+
+    /** Nome da regra que de fato responde cada teste pelas palavras ("" = nenhuma); horário, contatos e frequência ficam de fora. */
+    fun runRuleTests(tests: List<RuleTest>, active: List<Rule>): List<Pair<RuleTest, String>> =
+        tests.map { t -> t to (active.firstOrNull { it.enabled && Engine.matches(it, t.text) }?.name.orEmpty()) }
+
     /** Diagnóstico pela IA: o relatório (com o caminho de cada decisão), as regras e os ajustes, sem chaves nem link da planilha. */
     fun diagnosisPrompt(report: String, cfg: Config, rules: List<Rule>, question: String): String = buildString {
         append("""

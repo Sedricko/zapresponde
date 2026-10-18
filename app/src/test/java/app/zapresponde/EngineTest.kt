@@ -264,6 +264,11 @@ class EngineTest {
         assertTrue(tr.toString(), tr.any { "Frete escrito: entendi GOIANIA/GO → ANAPOLIS/GO, 1 carga" in it })
         val tr2 = run(msg("oi"), listOf(rule.copy(name = "Oi", match = Match.CONTAINS, keywords = "tchau"), rule.copy(name = "Tudo")), cfg, consulta = sheet).trace
         assertTrue(tr2.toString(), tr2.any { it.startsWith("❌ Regra Oi: não casou (Contém: tchau)") } && tr2.last().startsWith("✅ Regra Tudo: casou"))
+        val (tests, notes) = Assistant.parseRuleTests("""{"testes": [{"mensagem": "oi tchau", "regra": "Oi"}, {"mensagem": "bom dia", "regra": ""}], "observacoes": ["Tudo pega qualquer mensagem"]}""")
+        val rs = listOf(rule.copy(name = "Oi", match = Match.CONTAINS, keywords = "tchau"), rule.copy(name = "Tudo"))
+        assertEquals(listOf("Oi", "Tudo"), Assistant.runRuleTests(tests, rs).map { it.second })
+        assertEquals(listOf("Tudo pega qualquer mensagem"), notes)
+        assertTrue(Assistant.rulesTestPrompt(rs.take(1), rs).contains("Regras a testar: \"Oi\""))
         assertTrue(Assistant.diagnosisPrompt("REL", cfg.copy(aiKey = "SEGREDO"), listOf(rule), "").let { "REL" in it && "SEGREDO" !in it })
     }
 }
