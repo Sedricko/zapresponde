@@ -232,7 +232,9 @@ class EngineTest {
         assertEquals(listOf("carga sp serra"), Engine.freteLivre("Sao paulo para Serra", sheet)!!.messages)
         assertEquals(listOf("carga brasilia 1", "carga brasilia 2"), Engine.freteLivre("tem algo pra Brasilia?", sheet)!!.messages)
         assertEquals(emptyList<String>(), Engine.freteLivre("Anápolis para Goiânia", sheet)!!.messages)
-        assertEquals(null, Engine.freteLivre("goinaia para anapolis", sheet))
+        // Misspelled city is not recognized: only "para anapolis" counts, so it lists loads going to Anápolis.
+        assertEquals("ANAPOLIS/GO", Engine.freteLivre("goinaia para anapolis", sheet)!!.label)
+        assertEquals(null, Engine.freteLivre("goinaia anapoliss", sheet))
         assertEquals(null, Engine.freteLivre("vou de Goiania para casa", sheet))
         assertEquals(listOf("carga goiania anapolis", "carga aparecida", "carga brasilia 2"), Engine.freteLivre("tem carga saindo de goiania?", sheet)!!.messages)
         assertEquals(listOf("carga goiania anapolis"), Engine.freteLivre("GOIANIA PARA ANAPOLIS", sheet)!!.messages)
