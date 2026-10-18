@@ -51,7 +51,23 @@ class ReplyService : NotificationListenerService() {
     override fun onListenerConnected() {
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
-        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck() } }
+        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck(); problemCheck() } }
+    }
+
+    /** Grave problems already alerted, so each one vibrates once (until the app restarts). */
+    private val alerted = HashSet<String>()
+
+    /** Automatic alert: the diagnostic's grave problems, as soon as they happen. */
+    private fun problemCheck() {
+        val cfg = Store.config
+        if (!cfg.problemAlertOn) return
+        val grave = Problems.find(
+            cfg, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt, approvals.size, System.currentTimeMillis(),
+        ).filter { it.level == 0 && alerted.add(it.title.substringBefore(" recebeu").substringBefore(" respostas")) }
+        val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
+            android.app.PendingIntent.getActivity(this, 7, it, android.app.PendingIntent.FLAG_IMMUTABLE)
+        }
+        grave.forEach { Alerts.show(this, "Problema: ${it.title}", it.detail + "\nAbra Ferramentas > Diagnóstico para corrigir.", open) }
     }
 
     /** "Avisar quando a carga aparecer": a load someone asked for is now in the sheet. Ask, send by itself, or only tell you. */
@@ -125,7 +141,7 @@ class ReplyService : NotificationListenerService() {
                 continue
             }
             Store.log(chat, "", "📨 Acompanhamento enviado (link do grupo)")
-            val entry = HistoryEntry(now, APPS[pkg] ?: pkg, chat, false, "", text, "Acompanhamento")
+            val entry = HistoryEntry(now, APPS[pkg] ?: pkg, chat, false, "", text, "Acompanhamento", kind = "Link do grupo")
             Store.addHistory(entry)
             if (cfg.sheetOn && cfg.sheetLogOn) { Store.queue(historico = Sheets.historyRow(entry)); Sheets.syncNow(this) }
         }
@@ -256,6 +272,7 @@ class ReplyService : NotificationListenerService() {
             val entry = HistoryEntry(
                 System.currentTimeMillis(), APPS[pkg] ?: pkg, msg.chat, msg.isGroup,
                 msg.text, d.replies.joinToString("\n---\n"), d.rule, d.trace,
+                Problems.replyKind(d.rule, d.replies.joinToString("\n")), d.leadRow?.getOrNull(1).orEmpty(),
             )
             Store.addHistory(entry)
             val date = Sheets.historyRow(entry)[0]

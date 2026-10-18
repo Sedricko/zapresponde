@@ -369,4 +369,28 @@ class EngineTest {
         assertEquals(null, Engine.freteLivre("Fretes não publicados: 1. Ponta Grossa - PR >> Rio de Janeiro - RJ 2. Serra - ES >> Caratinga - MG", sheet))
         assertEquals(listOf("a"), Engine.freteLivre("Ponta Grossa para Rio de Janeiro", sheet)!!.messages)
     }
+
+    @Test fun problemas() {
+        val now = 100 * 3_600_000L
+        val min = 60_000L
+        val ev = listOf(
+            LogEntry(now - 1 * min, "Frete Bras - Publicações", "Fretes não publicados", "Respondido (Fretes (texto livre))"),
+            LogEntry(now - 2 * min, "Frete Bras - Publicações", "Fretes não publicados", "Respondido (Fretes (texto livre))"),
+            LogEntry(now - 3 * min, "Frete Bras - Publicações", "Fretes não publicados", "Respondido (Fretes (texto livre))"),
+            LogEntry(now - 4 * min, "Johon", "Que droga", "Nenhuma regra serviu"),
+            LogEntry(now - 5 * min, "Ana", "tem carga pra Cuiabá?", "Nenhuma regra serviu", listOf("ℹ️ Frete escrito: não é pedido de frete")),
+        )
+        val hist = listOf(HistoryEntry(now - 6 * min, "WhatsApp", "Johon", false, "oi", "❌ *FRETE INDISPONÍVEL*", "Fretes", listOf("✅ passo")))
+        val cfg = Config(freteOn = true, freteLivreOn = true, sheetOn = true, sheetUrl = "u", followOn = true)
+        val p = Problems.find(cfg, ev, hist, State(), emptyList(), "", now, 0, now)
+        val titles = p.map { it.title }
+        assertTrue(titles.toString(), p.first().level == 0 && p.first().fix == "exclude:Frete Bras - Publicações")
+        assertTrue(titles.toString(), titles.any { it.startsWith("Johon respondeu \"Que droga\"") })
+        assertTrue(titles.toString(), titles.any { "tem carga pra Cuiabá?" in it })
+        assertTrue(titles.toString(), titles.any { it.startsWith("Link do grupo ligado sem link") })
+        // Already in the exceptions: no longer a problem.
+        val cfg2 = cfg.copy(contactsOn = true, contactsMode = Audience.EXCEPT_LIST, contactsList = "Frete Bras - Publicações", followLink = "x")
+        assertTrue(Problems.find(cfg2, ev, hist, State(), emptyList(), "", now, 0, now).none { it.fix?.startsWith("exclude:") == true })
+        assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 5 · respondidas: 3 · sem resposta: 2"))
+    }
 }

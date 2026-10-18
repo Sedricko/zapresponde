@@ -104,10 +104,11 @@ fun FeatureRow(icon: ImageVector, title: String, subtitle: String, on: Boolean?,
 fun Divider() = HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
 @Composable
-fun Field(label: String, value: String, lines: Int = 1, help: String = "", onChange: (String) -> Unit) {
+fun Field(label: String, value: String, lines: Int = 1, help: String = "", maxLines: Int = Int.MAX_VALUE, onChange: (String) -> Unit) {
     OutlinedTextField(
         value, onChange, Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        label = { Text(label) }, singleLine = lines == 1, minLines = lines, shape = RoundedCornerShape(12.dp),
+        label = { Text(label) }, singleLine = lines == 1 && maxLines == Int.MAX_VALUE, minLines = lines, maxLines = if (lines == 1 && maxLines == Int.MAX_VALUE) 1 else maxLines,
+        shape = RoundedCornerShape(12.dp),
         supportingText = if (help.isEmpty()) null else ({ Text(help) }),
     )
 }

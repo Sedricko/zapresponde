@@ -132,6 +132,8 @@ object Assistant {
             1) para cada mensagem recente que pareça errada (respondeu o que não devia, não respondeu o que devia, respondeu várias vezes), diga o que aconteceu e por quê;
             2) se a decisão do app foi correta ou não;
             3) o que mudar, apontando o botão ou a regra exata em Ajustes. Se parecer defeito do app, diga "possível defeito do app" e descreva.
+            O relatório já começa com "Problemas encontrados", detectados pelo próprio app: comece por eles, confirme ou corrija cada um,
+            e só depois aponte o que mais você notar. Seja direto: diga o que está errado e o que fazer, sem rodeios.
             Não invente: use só o que está abaixo.
         """.trimIndent())
         if (question.isNotBlank()) append("\n\nPergunta do dono: ").append(question.trim())

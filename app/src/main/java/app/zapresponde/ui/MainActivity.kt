@@ -122,6 +122,8 @@ import app.zapresponde.Health
 import app.zapresponde.Freq
 import app.zapresponde.Groups
 import app.zapresponde.Incoming
+import app.zapresponde.Problem
+import app.zapresponde.Problems
 import app.zapresponde.Kind
 import app.zapresponde.Match
 import app.zapresponde.ReplyMode
@@ -221,7 +223,7 @@ fun App() {
                     "wait" -> WaitScreen()
                     "test" -> TestScreen()
                     "ai" -> AssistantScreen()
-                    "help" -> HelpScreen()
+                    "help" -> HelpScreen(open)
                     "ruletest" -> RuleTestPanel()
                 }
             }
@@ -372,7 +374,7 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
         Stat("Respostas", today.size.toString(), Modifier.weight(1f))
     }
 
-    val routes = remember(today, Store.sheet.syncedAt) {
+    val routes = remember(today) {
         today.mapNotNull { e -> routeOf(e) }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(3)
     }
     if (routes.isNotEmpty()) Panel("Rotas mais pedidas hoje") {
@@ -703,20 +705,12 @@ private val KIND_COLORS = mapOf(
 
 /** What a reply was, for the colored label and the counters: freight sent, unavailable, another load, group link or a rule. */
 private fun kindOf(e: app.zapresponde.HistoryEntry): Pair<String, Color> {
-    val k = when {
-        e.rule == "Acompanhamento" -> "Link do grupo"
-        e.rule == "Fretes (outra carga)" -> "Outra carga"
-        e.rule.startsWith("Fretes") || e.rule == "Carga que apareceu" -> if (Engine.closed(e.reply) || e.reply.contains("INDISPON")) "Indisponível" else "Carga enviada"
-        else -> "Regra"
-    }
-    return k to KIND_COLORS.getValue(k)
+    val k = e.kind.ifEmpty { Problems.replyKind(e.rule, e.reply) }
+    return k to (KIND_COLORS[k] ?: Color(0xFF7A7A7A))
 }
 
-/** Route asked in a freight reply ("GOIANIA/GO → ANAPOLIS/GO"), read again from the driver's message. */
-private fun routeOf(e: app.zapresponde.HistoryEntry): String? {
-    if (!e.rule.startsWith("Fretes")) return null
-    return Engine.freteRoute(e.text)?.label ?: Engine.freteLivre(e.text, Store.sheet.consulta)?.label
-}
+/** Route asked in a freight reply ("GOIANIA/GO → ANAPOLIS/GO"), saved with the reply. */
+private fun routeOf(e: app.zapresponde.HistoryEntry): String? = e.route.ifEmpty { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1315,7 +1309,7 @@ fun TestScreen() {
 }
 
 @Composable
-fun HelpScreen() {
+fun HelpScreen(open: (String) -> Unit) {
     val ctx = LocalContext.current
     val access = resumeTick >= 0 && NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
     val battery = resumeTick >= 0 && ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
@@ -1334,47 +1328,61 @@ fun HelpScreen() {
         Check("Respostas automáticas ligadas", Store.config.enabled) { cfg { copy(enabled = true) } }
     }
     val scope = rememberCoroutineScope()
-    var report by remember { mutableStateOf("") }
-    Panel("Relatório") {
-        Button({
-            report = "Testando..."
-            scope.launch { report = withContext(Dispatchers.IO) { diagnose(ctx) } }
-        }, Modifier.fillMaxWidth()) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Rodar diagnóstico completo") }
-        if (report.isNotEmpty()) {
-            Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
-            OutlinedButton({
-                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, report), "Enviar relatório"))
-            }, Modifier.fillMaxWidth()) { Text("Compartilhar relatório") }
-        }
-    }
     val c = Store.config
+    var report by remember { mutableStateOf("") }
+    var problems by remember { mutableStateOf<List<Problem>?>(null) }
     var question by rememberSaveable { mutableStateOf("") }
     var answer by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    Panel("Diagnóstico pela IA") {
-        SwitchRow("Ativar diagnóstico pela IA", c.aiDiagOn, "O relatório, com o texto das últimas mensagens, vai para o Gemini") { cfg { copy(aiDiagOn = it) } }
-        if (c.aiDiagOn) {
-            Field("Pergunta (opcional)", question, 2, help = "Ex.: por que respondeu várias vezes para o Meu?") { question = it }
-            Button({
-                busy = true; answer = "Rodando o diagnóstico e perguntando ao Gemini..."
-                scope.launch {
-                    answer = runCatching {
-                        withContext(Dispatchers.IO) {
-                            report = diagnose(ctx)
-                            Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report, c, Store.allRules(), question), jsonOut = false)
-                        }
-                    }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
-                    busy = false
-                }
-            }, Modifier.fillMaxWidth(), enabled = c.aiKey.isNotBlank() && !busy) { Icon(Icons.Default.Face, null); Spacer(Modifier.width(6.dp)); Text("Pedir análise à IA") }
-            if (c.aiKey.isBlank()) Hint("Cole a chave do Gemini em Ajustes > Assistente de IA.")
-            if (answer.isNotEmpty()) {
-                Text(answer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
-                if (!busy) OutlinedButton({
-                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, answer + "\n\n" + report), "Enviar análise"))
-                }, Modifier.fillMaxWidth()) { Text("Compartilhar análise e relatório") }
+    val withAi = c.aiDiagOn && c.aiKey.isNotBlank()
+    // One button: the full report and, with the AI on, its analysis right after.
+    fun run() {
+        busy = true; report = "Testando..."; answer = ""; problems = null
+        scope.launch {
+            report = withContext(Dispatchers.IO) { diagnose(ctx) }
+            problems = currentProblems()
+            if (withAi) {
+                answer = "A IA está analisando o relatório..."
+                answer = runCatching {
+                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report, c, Store.allRules(), question), jsonOut = false) }
+                }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
+            }
+            busy = false
+        }
+    }
+    fun share(text: String, title: String) =
+        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), title))
+
+    Panel("Diagnóstico completo") {
+        if (withAi) Field("Pergunta para a IA (opcional)", question, help = "Ex.: por que respondeu várias vezes para o Meu?", maxLines = 3) { question = it }
+        Button({ run() }, Modifier.fillMaxWidth(), enabled = !busy) {
+            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp))
+            Text(if (withAi) "Rodar diagnóstico e análise da IA" else "Rodar diagnóstico completo")
+        }
+        SwitchRow("Análise pela IA junto", c.aiDiagOn, "O relatório, com o texto das últimas mensagens, vai para o Gemini") { cfg { copy(aiDiagOn = it) } }
+        if (c.aiDiagOn && c.aiKey.isBlank()) Hint("Cole a chave do Gemini em Ferramentas > Assistente de IA.")
+        SwitchRow("Avisar na hora se algo grave acontecer", c.problemAlertOn, "Vibra quando, por exemplo, o app responde várias vezes a um robô") { cfg { copy(problemAlertOn = it) } }
+    }
+    problems?.let { list ->
+        Panel(if (list.any { it.level <= 1 }) "Problemas encontrados (${list.count { it.level <= 1 }})" else "Problemas encontrados") {
+            if (list.isEmpty()) Text("✅ Nenhum problema nas últimas 24 h.")
+            list.forEachIndexed { i, pr ->
+                if (i > 0) Divider()
+                ProblemItem(pr, open)
             }
         }
+    }
+    if (answer.isNotEmpty()) Panel("Análise da IA") {
+        Text(answer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+    }
+    if (report.isNotEmpty() && !busy) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton({ share(report, "Enviar relatório") }, Modifier.weight(1f)) { Text("Compartilhar relatório") }
+        if (answer.isNotEmpty() && !answer.startsWith("❌")) Button({ share("ANÁLISE DA IA\n\n$answer\n\n$report", "Enviar análise e relatório") }, Modifier.weight(1f)) {
+            Text("Compartilhar análise + relatório")
+        }
+    }
+    if (report.isNotEmpty()) Panel("Relatório") {
+        Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
     }
     Panel("Ações") {
         FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp", "Precisam estar ligadas para o app responder", null) {
@@ -1397,6 +1405,35 @@ fun HelpScreen() {
                 "• Android 15+: se aparecer aviso de notificação sensível, permita o acesso nas configurações.\n" +
                 "• Se nada resolver, desligue e ligue o acesso às notificações ou reinicie o celular.",
         )
+    }
+}
+
+private fun currentProblems() = Problems.find(
+    Store.config, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt,
+    ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
+)
+
+/** One problem: what happened, why, and a button that fixes it when one tap can. */
+@Composable
+private fun ProblemItem(p: Problem, open: (String) -> Unit) {
+    var done by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        Text("${p.icon} ${p.title}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+        Text(p.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+        val fix = p.fix ?: return@Column
+        if (done) { Text("✅ Feito", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium); return@Column }
+        TextButton({
+            if (fix.startsWith("open:")) open(fix.removePrefix("open:"))
+            else if (fix.startsWith("exclude:")) {
+                val chat = fix.removePrefix("exclude:")
+                val c = Store.config
+                // Exceptions only make sense in "Todos, exceto minha lista"; other modes are changed by hand on the screen.
+                if (!c.contactsOn || c.contactsMode == Audience.ALL || c.contactsMode == Audience.EXCEPT_LIST) {
+                    cfg { copy(contactsOn = true, contactsMode = Audience.EXCEPT_LIST, contactsList = (contactsList.trim() + "\n" + chat).trim()) }
+                    done = true
+                } else open("contacts")
+            }
+        }) { Text(if (fix.startsWith("exclude:")) "Colocar nas exceções" else "Corrigir") }
     }
 }
 
@@ -1462,8 +1499,9 @@ private fun diagnose(ctx: android.content.Context): String {
     if (Store.events.isEmpty()) l += "(nenhuma)"
     Store.events.take(15).forEachIndexed { i, e ->
         l += "${fmt(e.time)} · ${e.chat}: \"${e.text.take(50).replace('\n', ' ')}\" → ${e.result}"
-        // The 5 newest also show the path of the decision, step by step.
-        if (i < 5) e.trace.forEach { l += "      $it" }
+        // The 5 newest, and any message that went wrong, also show the path of the decision.
+        val wrong = !e.result.startsWith("Respondido") && !e.result.startsWith("Mensagem é uma resposta") && !e.result.startsWith("Serviço")
+        if (i < 5 || wrong) e.trace.forEach { l += "      $it" }
     }
     val causa = when {
         !NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) ->
@@ -1475,7 +1513,25 @@ private fun diagnose(ctx: android.content.Context): String {
             "Faz horas sem notificação do WhatsApp. Verifique WhatsApp Web aberto, conversas silenciadas ou notificações do WhatsApp desligadas."
         else -> null
     }
-    l.add(2, if (causa != null) "➡️ CAUSA MAIS PROVÁVEL: $causa" else "➡️ O ambiente parece saudável; veja o motivo de cada mensagem no fim.")
+    // Problems first: "healthy" only when there is nothing to fix, not just when the phone side is fine.
+    val probs = currentProblems()
+    val top = mutableListOf(
+        when {
+            causa != null -> "➡️ CAUSA MAIS PROVÁVEL: $causa"
+            probs.any { it.level <= 1 } -> "➡️ ${probs.count { it.level <= 1 }} problema(s) para resolver; veja abaixo."
+            else -> "➡️ Tudo certo: nenhum problema nas últimas 24 h."
+        },
+        "",
+    )
+    if (probs.isNotEmpty()) {
+        top += "— Problemas encontrados"
+        probs.forEach { pr -> top += "${pr.icon} ${pr.title}"; pr.detail.lines().forEach { top += "      $it" } }
+        top += ""
+    }
+    top += "— Últimas 24 h"
+    top += Problems.summary(Store.events, Store.history, now)
+    top += ""
+    l.addAll(2, top)
     return l.joinToString("\n")
 }
 

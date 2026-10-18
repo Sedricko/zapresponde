@@ -121,6 +121,8 @@ data class Config(
     val followLink: String = "",
     /** Frases que mostram que o contato já está no grupo; separadas por vírgula. */
     val followJoined: String = "já estou no grupo, já to no grupo, já sou do grupo, já participo, já faço parte, já estou nele, já entrei",
+    /** Avisa na hora (vibra) quando o diagnóstico acha um problema grave, como respostas repetidas a um robô. */
+    val problemAlertOn: Boolean = false,
     /** Diagnóstico pela IA: manda o relatório (com textos das mensagens) ao Gemini para explicar as decisões. */
     val aiDiagOn: Boolean = false,
 )
@@ -184,3 +186,18 @@ data class Decision(
     /** Every step of the decision, for the diagnostic and the AI review. */
     val trace: List<String> = emptyList(),
 )
+
+@Serializable
+data class HistoryEntry(
+    val time: Long, val app: String, val chat: String, val isGroup: Boolean,
+    val text: String, val reply: String, val rule: String,
+    /** Path of the decision, shown when you tap the reply in Histórico. */
+    val trace: List<String> = emptyList(),
+    /** Kind (Carga enviada, Indisponível, ...) and asked route, saved once so the screens don't recompute them. */
+    val kind: String = "",
+    val route: String = "",
+)
+
+/** One WhatsApp message the service saw, and what it decided: the "Registro" of the diagnostic. */
+@Serializable
+data class LogEntry(val time: Long, val chat: String, val text: String, val result: String, val trace: List<String> = emptyList())

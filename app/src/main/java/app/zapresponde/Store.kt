@@ -10,18 +10,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 @Serializable
-data class HistoryEntry(
-    val time: Long, val app: String, val chat: String, val isGroup: Boolean,
-    val text: String, val reply: String, val rule: String,
-    /** Path of the decision, shown when you tap the reply in Histórico. */
-    val trace: List<String> = emptyList(),
-)
-
-/** One WhatsApp message the service saw, and what it decided: the "Registro" of the diagnostic. */
-@Serializable
-data class LogEntry(val time: Long, val chat: String, val text: String, val result: String, val trace: List<String> = emptyList())
-
-@Serializable
 data class SheetCache(
     val rules: List<Rule> = emptyList(),
     val consulta: List<List<String>> = emptyList(),
