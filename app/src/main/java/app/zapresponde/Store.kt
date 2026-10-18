@@ -78,10 +78,16 @@ object Store {
         json.decodeFromString<T>(File(dir, name).readText())
     }.getOrNull()
 
+    /** Files are written on one background thread, in order, so a reply or the screen never waits for the disk. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private inline fun <reified T> save(name: String, value: T) {
-        val tmp = File(dir, "$name.tmp")
-        tmp.writeText(json.encodeToString(value))
-        tmp.renameTo(File(dir, name))
+        val text = json.encodeToString(value)
+        writer.execute {
+            val tmp = File(dir, "$name.tmp")
+            tmp.writeText(text)
+            tmp.renameTo(File(dir, name))
+        }
     }
 
     fun exportBackup(): String = json.encodeToString(Backup(config = config.copy(aiKey = ""), rules = rules))
@@ -122,7 +128,7 @@ object Store {
 
     @Synchronized
     fun addHistory(e: HistoryEntry) {
-        history = (listOf(e) + history).take(500)
+        history = (listOf(e) + history).take(300)
         save("history.json", history)
     }
 

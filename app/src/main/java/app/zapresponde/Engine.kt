@@ -186,7 +186,7 @@ object Engine {
 
     /** Acompanhamento text: {link} is the group link, plus the usual variables. */
     fun followText(cfg: Config, msg: Incoming, now: LocalDateTime, count: Int) =
-        fill(cfg.followText.replace("{link}", cfg.followLink.trim()), msg, now, count)
+        fill(cfg.followText.replace("{link}", cfg.followLink.trim()), msg, now, count).replaceFirstChar { it.uppercase() }
 
     /** Reason to stay silent under the "Contatos" setting, or null to go on. [phoneNames] are normalized. */
     fun audience(msg: Incoming, cfg: Config, phoneNames: Set<String>): String? {
@@ -465,6 +465,8 @@ object Engine {
         val loads = rows.mapNotNull { row -> rowPlaces(row)?.let { p -> Triple(row, City(words(p[0]), p[1]), City(words(p[2]), p[3])) } }
         if (loads.isEmpty()) return null
         val found = citiesIn(text, loads.flatMap { listOf(it.second, it.third) }.toSet())
+        // Three or more cities is a list (e.g. FreteBras "Fretes não publicados: 1. A >> B 2. C >> D"), not a question.
+        if (found.size > 2) return null
         fun ready(hits: List<Triple<List<String>, City, City>>) = nearestFirst(hits.map { it.first }, now).map(::ready).distinct()
         if (found.size >= 2) {
             val from = found[0].map { it.key }; val to = found[1].map { it.key }
@@ -545,7 +547,8 @@ object Engine {
         // Unsaved contacts come as a phone number; "Olá +55, ..." reads badly, so drop the name instead.
         val first = msg.sender.trim().split(" ").first().takeIf { w -> w.any { it.isLetter() } }.orEmpty()
         return s.replace("{nome}", msg.sender)
-            .let { if (first.isEmpty()) it.replace(" {primeiro_nome}", "") else it }
+            // "Bom dia, {primeiro_nome}!" without a name must read "Bom dia!", not "Bom dia,!".
+            .let { if (first.isEmpty()) it.replace(Regex(""",?[ \t]*\{primeiro_nome\}"""), "") else it }
             .replace("{primeiro_nome}", first)
             .replace("{mensagem}", msg.text)
             .replace("{data}", now.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))

@@ -358,4 +358,15 @@ class EngineTest {
         run(msg("tem algo pra Brasilia?", sender = "Ana"), listOf(rule), cfg.copy(altOn = false), state = st2, consulta = sheet + listOf(listOf("Brasília/DF para Goiânia/GO", "volta")))
         assertEquals(1, Engine.waitingFound(st2, sheet + listOf(listOf("Anápolis/GO para Brasília/DF", "ida • Coleta: Ter 20/10 08:00"), listOf("Brasília/DF para Goiânia/GO", "volta")), monday10, 1_000_000L, 24).size)
     }
+
+    @Test fun relatorio1810() {
+        // Number without a name: "Bom dia, {primeiro_nome}!" must not become "bom dia,!"; the text starts in upper case.
+        val cfg = on.copy(followLink = "L", followText = "{saudacao}, {primeiro_nome}! Grupo: {link}")
+        assertEquals("Bom dia! Grupo: L", Engine.followText(cfg, msg("x", sender = "+55 51 8544-7212"), monday10, 1))
+        assertEquals("Bom dia, Ana! Grupo: L", Engine.followText(cfg, msg("x", sender = "Ana Lima"), monday10, 1))
+        // A FreteBras notice listing several routes is not a freight question.
+        val sheet = listOf(listOf("x", ""), listOf("Ponta Grossa/PR para Rio de Janeiro/RJ", "a"), listOf("Serra/ES para Caratinga/MG", "b"))
+        assertEquals(null, Engine.freteLivre("Fretes não publicados: 1. Ponta Grossa - PR >> Rio de Janeiro - RJ 2. Serra - ES >> Caratinga - MG", sheet))
+        assertEquals(listOf("a"), Engine.freteLivre("Ponta Grossa para Rio de Janeiro", sheet)!!.messages)
+    }
 }

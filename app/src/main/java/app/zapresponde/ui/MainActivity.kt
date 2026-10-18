@@ -15,6 +15,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -174,7 +176,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico", "ruletest" to "Testar regras com a IA",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,6 +186,8 @@ fun App() {
     // Detail screen on top of the tabs: a feature key or "rule:<id>".
     var sub by rememberSaveable { mutableStateOf("") }
     var newRule by remember { mutableStateOf(false) }
+    // One scroll position per tab, kept while a detail screen is open, so "back" returns to the same spot.
+    val scrolls = remember { HashMap<String, ScrollState>() }
     BackHandler(sub.isNotEmpty() || tab != "home") { if (sub.isNotEmpty()) sub = "" else tab = "home" }
     val open: (String) -> Unit = { sub = it }
     val bar = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
@@ -198,7 +202,7 @@ fun App() {
                 )
             },
         ) { pad ->
-            Page(pad) {
+            Page(pad, remember(sub) { ScrollState(0) }) {
                 if (ruleId != null) RuleEdit(ruleId) { sub = "" }
                 else when (sub) {
                     "welcome" -> WelcomeScreen()
@@ -218,6 +222,7 @@ fun App() {
                     "test" -> TestScreen()
                     "ai" -> AssistantScreen()
                     "help" -> HelpScreen()
+                    "ruletest" -> RuleTestPanel()
                 }
             }
         }
@@ -250,7 +255,7 @@ fun App() {
             )
         },
     ) { pad ->
-        Page(pad) {
+        Page(pad, scrolls.getOrPut(tab) { ScrollState(0) }) {
             when (tab) {
                 "home" -> Home(open, { tab = it }, { newRule = true })
                 "rules" -> RulesTab(open)
@@ -268,8 +273,8 @@ fun App() {
 }
 
 @Composable
-private fun Page(pad: PaddingValues, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+private fun Page(pad: PaddingValues, scroll: ScrollState, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().padding(pad).verticalScroll(scroll).padding(horizontal = 16.dp)) {
         content()
         Spacer(Modifier.height(96.dp))
     }
@@ -330,8 +335,8 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
 
     val now = System.currentTimeMillis()
     val h = Store.history
-    val today = h.filter { now - it.time < 86_400_000 }
-    val kinds = today.groupingBy { kindOf(it).first }.eachCount()
+    val today = remember(h) { h.filter { now - it.time < 86_400_000 } }
+    val kinds = remember(today) { today.groupingBy { kindOf(it).first }.eachCount() }
     val waiting = Store.state.waiting.size
     val approvals = ReplyService.instance?.approvalsPending() ?: 0
 
@@ -367,7 +372,9 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
         Stat("Respostas", today.size.toString(), Modifier.weight(1f))
     }
 
-    val routes = today.mapNotNull { e -> routeOf(e) }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(3)
+    val routes = remember(today, Store.sheet.syncedAt) {
+        today.mapNotNull { e -> routeOf(e) }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(3)
+    }
     if (routes.isNotEmpty()) Panel("Rotas mais pedidas hoje") {
         routes.forEachIndexed { i, (route, n) ->
             if (i > 0) Divider()
@@ -554,6 +561,7 @@ fun RuleEdit(id: String, done: () -> Unit) {
             Text("Apagar", color = MaterialTheme.colorScheme.error)
         }
     }
+    if (r.enabled) RuleTestPanel(only = id)
 }
 
 const val VARS = "Variáveis: {nome} {primeiro_nome} {mensagem} {data} {hora} {dia_semana} {saudacao} {grupo} {contador}"
@@ -716,9 +724,13 @@ fun HistoryScreen() {
     val all = Store.history
     var filter by rememberSaveable { mutableStateOf("Todos") }
     var search by rememberSaveable { mutableStateOf("") }
-    val h = all.filter { e ->
-        (filter == "Todos" || kindOf(e).first == filter) &&
-            (search.isBlank() || Engine.normalize(e.chat).contains(Engine.normalize(search)) || Engine.normalize(e.text).contains(Engine.normalize(search)))
+    var shown by rememberSaveable { mutableStateOf(30) }
+    val h = remember(all, filter, search) {
+        val q = Engine.normalize(search)
+        all.filter { e ->
+            (filter == "Todos" || kindOf(e).first == filter) &&
+                (q.isEmpty() || Engine.normalize(e.chat).contains(q) || Engine.normalize(e.text).contains(q))
+        }
     }
     Hint("${all.size} respostas guardadas · ${all.count { System.currentTimeMillis() - it.time < 86_400_000 }} nas últimas 24h · toque numa resposta para ver por quê")
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -729,10 +741,11 @@ fun HistoryScreen() {
     Field("Buscar contato ou mensagem", search) { search = it }
     Panel {
         if (h.isEmpty()) Hint(if (all.isEmpty()) "Nenhuma resposta enviada ainda." else "Nada com esse filtro.")
-        h.take(100).forEachIndexed { i, e ->
+        h.take(shown).forEachIndexed { i, e ->
             if (i > 0) Divider()
             HistoryItem(e)
         }
+        if (h.size > shown) TextButton({ shown += 30 }, Modifier.fillMaxWidth()) { Text("Mostrar mais (${h.size - shown})") }
     }
 }
 
@@ -780,6 +793,8 @@ fun MoreTab(open: (String) -> Unit) {
     }
     Panel("Ferramentas") {
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
+        Divider()
+        FeatureRow(Icons.Default.CheckCircle, "Testar regras com a IA", "Escolha as regras; a IA cria as mensagens e testa sozinha", null) { open("ruletest") }
         Divider()
         FeatureRow(Icons.Default.Info, "Diagnóstico", "Por que respondeu ou não · IA ${on(c.aiDiagOn)}", null) { open("help") }
         Divider()
@@ -990,7 +1005,8 @@ private fun ContactPicker(selected: List<String>, dismiss: () -> Unit, done: (Li
     val chosen = remember { mutableStateListOf<String>().apply { addAll(selected) } }
     Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.padding(16.dp)) {
+            // Android 15 draws under the status and navigation bars; without this the bottom buttons hide behind them.
+            Column(Modifier.systemBarsPadding().padding(16.dp)) {
                 Text("Escolher contatos (${chosen.size})", style = MaterialTheme.typography.titleLarge)
                 Field("Buscar", query) { query = it }
                 val q = Engine.normalize(query)
@@ -1007,12 +1023,11 @@ private fun ContactPicker(selected: List<String>, dismiss: () -> Unit, done: (Li
                         }
                     }
                 }
-                Row {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton({ chosen.removeAll(shown) }) { Text("Desmarcar visíveis") }
                     TextButton({ chosen.addAll(shown.filter { it !in chosen }) }) { Text("Marcar visíveis") }
-                    Spacer(Modifier.weight(1f))
-                    Button({ done(chosen.toList()) }) { Text("Concluir") }
                 }
+                Button({ done(chosen.toList()) }, Modifier.fillMaxWidth()) { Text("Concluir (${chosen.size})") }
             }
         }
     }
@@ -1207,18 +1222,19 @@ fun AssistantScreen() {
 
 /** A IA cria mensagens para as regras escolhidas; o app confere qual regra responde cada uma e mostra o que não bateu. */
 @Composable
-private fun RuleTestPanel() {
+private fun RuleTestPanel(only: String? = null) {
     val c = Store.config
     val scope = rememberCoroutineScope()
     val active = Store.allRules().filter { it.enabled }
-    var picked by remember { mutableStateOf(active.map { it.id }.toSet()) }
+    var picked by remember { mutableStateOf(if (only != null) setOf(only) else active.map { it.id }.toSet()) }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Pair<List<Pair<Assistant.RuleTest, String>>, List<String>>?>(null) }
     if (active.isEmpty()) { Panel("Testar regras com a IA") { Hint("Nenhuma regra ativa para testar.") }; return }
     Panel("Testar regras com a IA") {
-        Hint("Escolha as regras. A IA inventa mensagens de clientes e o app confere qual regra responderia cada uma, na ordem real. Só as regras vão ao Gemini.")
-        active.forEach { r ->
+        if (!c.aiOn || c.aiKey.isBlank()) Hint("Ligue o Assistente de IA e cole a chave do Gemini em Ferramentas > Assistente de IA.")
+        Hint(if (only != null) "A IA inventa mensagens de clientes para esta regra e o app confere qual regra responderia cada uma, na ordem real." else "Escolha as regras. A IA inventa mensagens de clientes e o app confere qual regra responderia cada uma, na ordem real. Só as regras vão ao Gemini.")
+        if (only == null) active.forEach { r ->
             Row(Modifier.fillMaxWidth().clickable { picked = if (r.id in picked) picked - r.id else picked + r.id }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(r.id in picked, { picked = if (it) picked + r.id else picked - r.id })
                 Text(r.name)

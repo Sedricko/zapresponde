@@ -1,6 +1,6 @@
 # ZapResponde: contexto para continuar o trabalho
 
-Atualizado em 18/10/2026, app 0.9.15 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
+Atualizado em 18/10/2026, app 0.9.16 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
 
 ## O que é
 App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao WhatsApp Business automaticamente, lendo as notificações. Ele se integra ao Google Sheets por um Apps Script colado na planilha. Dono: William (Transportes Poloni, cargas e fretes). A comunicação é sempre em português.
@@ -89,6 +89,7 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
   - Com pedidos esperando carga, o serviço lê a planilha a cada `waitReadMin` (5) min.
   - Backup: textos claros; o "Salvar backup" abre o seletor do Android (Google Drive, pCloud com app instalado, pasta); botão "Salvar backup na planilha agora". Drive/pCloud por API não: exigiria cadastro OAuth no Google Cloud/pCloud; o seletor já cobre.
   - Ícone próprio por função; frase "o que faz" no topo das telas de frete.
+- 0.9.16 (relatório do William de 18/10 10:19): seletor de contatos com `systemBarsPadding` (Android 15 desenha atrás das barras; o "Concluir" sumia); posição da lista de cada aba guardada ao abrir e voltar de uma tela (`scrolls` em `App`); Início e Histórico calculam uma vez por mudança (`remember`), Histórico mostra 30 por vez; `Store.save` grava em disco numa thread separada; histórico guarda 300. Acompanhamento e aviso de carga conferem o filtro de Contatos na hora de enviar (o chat-robô "Frete Bras - Publicações" recebeu o link depois de entrar nas exceções). `fill` sem nome: "Bom dia, {primeiro_nome}!" vira "Bom dia!"; texto do acompanhamento começa maiúsculo. `freteLivre` com 3+ cidades = lista, não pedido. "Testar regras com a IA" em Ferramentas e no fim de cada regra (só ela).
 - Estado de uma resposta só é devolvido se o envio falhar ou se você descartar a aprovação, nunca no cancelamento por mensagem nova (isso apagava a pausa de quando você assume). "Respondido" só vai para o registro depois do envio.
 - Testado no celular: respostas, boas-vindas, regras, gravação do Historico na planilha e Fretes (a primeira mensagem FreteBras foi respondida). A planilha de cargas está ligada, com 164 linhas.
 - Último problema: dois anúncios só com link ficaram sem resposta. A causa provável é o WhatsApp Web aberto (sem notificação no celular) ou a conversa pausada. Pedi para ele rodar o Diagnóstico e mandar o relatório.
