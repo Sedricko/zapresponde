@@ -308,6 +308,8 @@ object Engine {
      * Null = not a freight question.
      */
     fun freteLivre(text: String, rows: List<List<String>>): FreeFrete? {
+        // A load ad (ours echoed by another WhatsApp, or a list) names two cities but asks nothing; answering it loops.
+        if (Regex("""origem:[\s\S]*destino:""").containsMatchIn(normalize(text))) return null
         val loads = rows.mapNotNull { row -> rowPlaces(row)?.let { p -> Triple(row, City(words(p[0]), p[1]), City(words(p[2]), p[3])) } }
         if (loads.isEmpty()) return null
         val found = citiesIn(text, loads.flatMap { listOf(it.second, it.third) }.toSet())

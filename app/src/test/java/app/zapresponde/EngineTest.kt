@@ -239,6 +239,7 @@ class EngineTest {
         assertEquals(listOf("carga goiania anapolis", "carga aparecida", "carga brasilia 2"), Engine.freteLivre("tem carga saindo de goiania?", sheet)!!.messages)
         assertEquals(listOf("carga goiania anapolis"), Engine.freteLivre("GOIANIA PARA ANAPOLIS", sheet)!!.messages)
         assertEquals(null, Engine.freteLivre("Boa noite, estou em Goiânia", sheet))
+        assertEquals(null, Engine.freteLivre("🚛 FRETE DISPONÍVEL\n🏭 *ORIGEM:* GOIÂNIA/GO\n📍 *DESTINO:* ANÁPOLIS/GO", sheet))
         val cfg = on.copy(freteOn = true, freteLivreOn = true, freteNotFound = "indisponível")
         val rule = Rule(match = Match.ALL, replies = listOf("regra"))
         assertEquals(listOf("carga goiania anapolis"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).replies)
