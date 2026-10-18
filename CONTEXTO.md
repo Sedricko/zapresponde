@@ -19,9 +19,11 @@ App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao Wha
 - Assinatura fixa (`app/zapresponde.keystore`, alias e senha `zapresponde`): as atualizações instalam por cima.
 - O ambiente na nuvem bloqueia dl.google.com, maven.google.com, script.google.com e o download de artifacts. Por isso o APK sai pelo CI. Os testes JVM rodam localmente com um projeto gradle à parte, só com Model.kt, Engine.kt e EngineTest.kt.
 - Versão do app: `app/build.gradle.kts` (versionCode e versionName). Suba a cada entrega.
-- Arquivos do projeto: `/mnt/project-files/zapresponde/Codigo.gs` (script atual) e `Guia-ZapResponde-0.9.2.pdf` (manual do usuário).
+- Arquivos do projeto em `/mnt/project-files/zapresponde/`: `Codigo.gs` (script atual), `TUTORIAL-ZapResponde-0.9.5.md` (manual do usuário, substitui o guia PDF 0.9.2), `skill-zapresponde/SKILL.md`, `PACOTE-0.9.5.md` e o zip com tudo para abrir em outra IA.
 
 ## Arquitetura (app/src/main/java/app/zapresponde)
+- **Health.kt:** rastro de conexão/desconexão do listener e das notificações; `report()` para o Diagnóstico.
+- **Assistant.kt:** Assistente de IA (Gemini): `prompt`, `parse`, `problems`, `check`, `gemini`.
 - **Model.kt:** enums Match, Who, Groups, Freq, ReplyMode, Kind e Audience. Classes Rule, Config (todos os botões), ChatState, State (com lastBackup), Incoming (com fromMe) e Decision (replies, rule, delayMs, formRow, reason, leadRow, alert).
 - **Engine.kt:** lógica pura com testes. `decide()` segue esta ordem:
   1. robô ligado
@@ -47,7 +49,7 @@ App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao Wha
 - **Sheets.kt:** web app do Apps Script. `read` faz GET ?key=. `append` faz POST e depois GET no Location. `readBackup` usa ?backup=1. `refresh`, `scriptVersion`. O SyncWorker (WorkManager, mínimo de 15 min) envia a fila e faz o backup diário.
 - **Alerts.kt:** canal "alertas", alerta de carga e notificação de aprovação com Enviar e Descartar (ApprovalReceiver).
 - **Contacts.kt:** READ_CONTACTS, nomes da agenda (cache de 10 min).
-- **ui/MainActivity.kt:** abas Início, Regras, Planilha, Histórico e Ajustes, com telas de detalhe. Ajustes tem Respostas, Comportamento e Ferramentas (Testar respostas, Backup, Diagnóstico). **ui/Widgets.kt** e **ui/Theme.kt** (verde #128C5E).
+- **ui/MainActivity.kt:** abas Início, Regras, Planilha, Histórico e Ajustes, com telas de detalhe. Ajustes tem Respostas, Comportamento e Ferramentas (Assistente de IA, Testar respostas, Backup, Diagnóstico). **ui/Widgets.kt** e **ui/Theme.kt** (verde #128C5E).
 - **apps-script/Codigo.gs:**
   - Menu ZapResponde: Conectar celular (QR), Ligar planilha de cargas, Gerar nova chave, Versão do script.
   - `doGet` devolve Respostas, Consulta (ou a primeira aba da planilha de cargas da propriedade CARGAS) e `versao`, ou o Backup com ?backup=1.
@@ -62,7 +64,7 @@ App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao Wha
   - O ZapResponde só lê essa planilha. Atenção: em 17/10 o William colou o script do ZapResponde no projeto "Macros gravadas" dessa planilha por engano. Pedi para ele remover e confirmar se o código "Gestão de Cargas" não foi apagado. Até agora não confirmou.
 
 ## Funções prontas (todas com botão em Ajustes)
-Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e grupos por regra, consulta à planilha), Boas-vindas, Pedido pela conversa (aba Pedidos), Cabeçalho e rodapé, Atraso humano, Agenda, Pausa quando você assume, Proteção contra loop, Contatos (estilo WhatAuto com seletor da agenda), **Fretes FreteBras** (rota pela frase ou pelo link, mensagem da coluna B, ou "FRETE INDISPONÍVEL" editável com o link do grupo), Aba Leads, Alerta de carga pedida, Modo aprovação, Backup (arquivo e diário na planilha), Testar respostas, **Diagnóstico** (relatório completo e últimas 15 mensagens com o motivo) e Histórico.
+Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e grupos por regra, consulta à planilha), Boas-vindas, Pedido pela conversa (aba Pedidos), Cabeçalho e rodapé, Atraso humano, Agenda, Pausa quando você assume, Proteção contra loop, Contatos (estilo WhatAuto com seletor da agenda), **Fretes FreteBras** (rota pela frase ou pelo link, mensagem da coluna B, ou "FRETE INDISPONÍVEL" editável com o link do grupo), Aba Leads, Alerta de carga pedida, Modo aprovação, Backup (arquivo e diário na planilha), Testar respostas, **Diagnóstico** (relatório completo, causa mais provável e últimas 15 mensagens com o motivo), **Assistente de IA** e Histórico.
 
 ## Estado e pendências (18/10/2026)
 - 0.9.4 (aguardando teste no celular): `Health.kt` guarda conexão/desconexão do serviço e últimas notificações; o serviço pede reconexão sozinho; Diagnóstico mostra aparelho, recursos, erro de sincronização e "CAUSA MAIS PROVÁVEL"; Início mostra "Ligado, sem conexão"; motivo detalhado quando nenhuma regra responde; sincronização com trava única; frete lê a planilha com timeout de 8 s. Script 0.9.3: só grava nas abas do app e como texto puro.
@@ -71,7 +73,7 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
 - Testado no celular: respostas, boas-vindas, regras, gravação do Historico na planilha e Fretes (a primeira mensagem FreteBras foi respondida). A planilha de cargas está ligada, com 164 linhas.
 - Último problema: dois anúncios só com link ficaram sem resposta. A causa provável é o WhatsApp Web aberto (sem notificação no celular) ou a conversa pausada. Pedi para ele rodar o Diagnóstico e mandar o relatório.
 - **Sugestões aguardando aprovação:**
-  1. Responder mensagens fora do padrão FreteBras ("tem carga de Goiânia pra Rio Verde?"): achar origem e destino da planilha no texto, e só destino lista até 3 cargas.
+  1. Responder mensagens fora do padrão FreteBras ("Goiania/GO para Aparecida de Goiania", "Sao paulo pra Serra", "tem carga de Goiânia pra Rio Verde?"): aceitar "X para/pra Y" com ou sem UF e acento, reconhecer as cidades pelas rotas da planilha de cargas, listar até 3 cargas quando houver só destino ou ambiguidade, e "FRETE INDISPONÍVEL" quando não achar. Botão em Ajustes > Fretes, desligado. O William pediu exemplos e gostou; falta o "sim" final.
   2. "Comandos da planilha": texto da coluna A que não é rota vira comando exato (ex.: "Lista").
 - Fase 2 do plano original, ainda não feita: menu de atendimento, follow-up e ficha de cliente (CRM). Plano: https://claude.ai/code/artifact/6f406ff7-3639-4dba-b99c-71bc37ae628c
 
