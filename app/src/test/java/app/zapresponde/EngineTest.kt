@@ -244,8 +244,22 @@ class EngineTest {
         val rule = Rule(match = Match.ALL, replies = listOf("regra"))
         assertEquals(listOf("carga goiania anapolis"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).replies)
         assertEquals(listOf("indisponível"), run(msg("Anápolis para Goiânia"), listOf(rule), cfg, consulta = sheet).replies)
-        assertTrue(run(msg("tem algo pra Brasilia?"), listOf(rule), cfg, consulta = sheet).replies[0].startsWith("Achei 2 cargas para BRASILIA/DF"))
+        // Only one load is sent: the one picking up soonest from today (monday10 = 19/10); past and undated ones go last.
+        assertEquals(listOf("carga brasilia 1"), run(msg("tem algo pra Brasilia?"), listOf(rule), cfg, consulta = sheet).replies)
+        val dated = listOf(
+            listOf("Goiânia/GO para Anápolis/GO", "sem data"),
+            listOf("Goiânia/GO para Anápolis/GO", "• Coleta: Sex 16/10 08:00"),
+            listOf("Goiânia/GO para Anápolis/GO", "• Coleta: Qua 21/10 08:00"),
+            listOf("Goiânia/GO para Anápolis/GO", "• Coleta: Ter 20/10 07:00"),
+        )
+        assertEquals(listOf("• Coleta: Ter 20/10 07:00"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = dated).replies)
+        assertEquals("• Coleta: Ter 20/10 07:00", Engine.freteMessage(Engine.freteRoute("frete de Goiânia/GO para Anápolis/GO")!!, dated, monday10))
+        assertEquals(LocalDateTime.of(2027, 1, 5, 0, 0), Engine.loadDate(listOf("Coleta: 05/01"), LocalDateTime.of(2026, 12, 20, 9, 0)))
         assertEquals(listOf("regra"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg.copy(freteLivreOn = false), consulta = sheet).replies)
+        // Our reply to one chat, seen again as a message from another chat (the other WhatsApp on the phone), is an echo.
+        val st = State()
+        val sent = run(msg("Goiânia para Anápolis", sender = "Johon"), listOf(rule), cfg, state = st, consulta = sheet).replies[0]
+        assertEquals("Mensagem é uma resposta nossa", run(msg(sent, sender = "Você"), listOf(rule), cfg, state = st, consulta = sheet).reason)
         val tr = run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).trace
         assertTrue(tr.toString(), tr.any { "Frete escrito: entendi GOIANIA/GO → ANAPOLIS/GO, 1 carga" in it })
         val tr2 = run(msg("oi"), listOf(rule.copy(name = "Oi", match = Match.CONTAINS, keywords = "tchau"), rule.copy(name = "Tudo")), cfg, consulta = sheet).trace

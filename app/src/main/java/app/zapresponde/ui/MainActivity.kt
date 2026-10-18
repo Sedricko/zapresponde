@@ -929,7 +929,7 @@ fun FreteScreen() {
         Field("Quando a carga não estiver na planilha", c.freteNotFound, lines = 5, help = "Deixe vazio para não responder.") { cfg { copy(freteNotFound = it) } }
     }
     Panel {
-        Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, usa a do mesmo tipo de carga. A planilha precisa estar ligada em Planilha > Google Sheets; sem isso, o app usa a última cópia das cargas, que não atualiza.")
+        Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, manda só uma: a do mesmo tipo de carga e com a coleta mais próxima (linha "Coleta: dd/mm" da mensagem). A planilha precisa estar ligada em Planilha > Google Sheets; sem isso, o app usa a última cópia das cargas, que não atualiza.")
     }
 }
 

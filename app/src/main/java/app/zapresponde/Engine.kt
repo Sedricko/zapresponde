@@ -45,8 +45,8 @@ object Engine {
         t += if (cfg.scheduleOn) "✅ Dentro da agenda (${cfg.scheduleHours})" else "ℹ️ Agenda desligada"
         val cs = state.chats.getOrPut(msg.chat) { ChatState() }
         if (cs.pauseUntil > nowMs) return skip("Conversa pausada")
-        // A message equal to something we just sent is our own reply echoed back in the notification.
-        if (msg.text in cs.lastTexts) return skip("Mensagem é uma resposta nossa")
+        // A message equal to something we just sent is our own reply echoed back, in this chat or another WhatsApp on the phone.
+        if (state.chats.values.any { c -> c.lastTexts.any { it.trim() == msg.text.trim() } }) return skip("Mensagem é uma resposta nossa")
         t += "✅ Conversa não pausada e mensagem não é eco de resposta nossa"
         if (cfg.loopGuardOn) {
             cs.recentReplies.removeAll { nowMs - it > LOOP_WINDOW }
@@ -90,7 +90,7 @@ object Engine {
         // Before the welcome: a FreteBras driver is a new contact, and should get only the freight answer.
         if (!cfg.freteOn) t += "ℹ️ Fretes desligado"
         if (cfg.freteOn) freteRoute(msg.text)?.let { route ->
-            val found = freteMessage(route, consulta)
+            val found = freteMessage(route, consulta, now)
             t += "✅ Anúncio FreteBras, rota ${route.label}: " + if (found != null) "carga achada na planilha" else "rota fora da planilha"
             val reply = found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes", null, random).copy(
@@ -100,15 +100,12 @@ object Engine {
         }
         if (cfg.freteOn) t += "ℹ️ Não é anúncio FreteBras"
         if (cfg.freteOn && !cfg.freteLivreOn) t += "ℹ️ Frete escrito de qualquer jeito desligado"
-        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta).also { f ->
+        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta, now).also { f ->
             t += if (f == null) "ℹ️ Frete escrito: não é pedido de frete (nenhuma cidade da planilha, anúncio de carga, ou uma cidade só sem \"para\"/\"carga\")"
-            else "✅ Frete escrito: entendi ${f.label}, ${f.messages.size} carga(s) na planilha"
+            else "✅ Frete escrito: entendi ${f.label}, ${f.messages.size} carga(s) na planilha" +
+                if (f.messages.size > 1) "; mandei só a de coleta mais próxima" else ""
         }?.let { f ->
-            val reply = when (f.messages.size) {
-                0 -> cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
-                1 -> f.messages[0]
-                else -> "Achei ${f.messages.size} cargas para ${f.label}:\n\n" + f.messages.joinToString("\n\n")
-            }
+            val reply = f.messages.firstOrNull() ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
             val ok = f.messages.isNotEmpty()
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes (texto livre)", null, random).copy(
                 leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else "indisponível"),
@@ -330,26 +327,53 @@ object Engine {
         return out
     }
 
+    /** Ready message of a sheet row: its longest cell after column A. */
+    private fun ready(row: List<String>) = (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim()
+
+    private val COLETA = Regex("""coleta:\W*(?:[a-z]+\W+)?(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?:\W+(\d{1,2}):(\d{2}))?""")
+
+    /** Pickup date of a load ("Coleta: Seg 19/10 08:00"); without a year, the one that puts it closest to [now]. */
+    fun loadDate(row: List<String>, now: LocalDateTime): LocalDateTime? {
+        val g = COLETA.find(normalize(row.joinToString("\n")))?.groupValues ?: return null
+        return runCatching {
+            val y = g[3].toIntOrNull()?.let { if (it < 100) it + 2000 else it } ?: now.year
+            var d = LocalDateTime.of(y, g[2].toInt(), g[1].toInt(), g[4].toIntOrNull() ?: 0, g[5].toIntOrNull() ?: 0)
+            if (g[3].isEmpty() && d.isBefore(now.minusMonths(6))) d = d.plusYears(1)
+            if (g[3].isEmpty() && d.isAfter(now.plusMonths(6))) d = d.minusYears(1)
+            d
+        }.getOrNull()
+    }
+
+    /** Loads picking up from today on come first, soonest first; then past ones, latest first; then rows without a date. */
+    fun nearestFirst(rows: List<List<String>>, now: LocalDateTime): List<List<String>> {
+        val today = now.toLocalDate().atStartOfDay()
+        return rows.sortedWith(compareBy { row ->
+            val d = loadDate(row, now) ?: return@compareBy Long.MAX_VALUE
+            val min = java.time.Duration.between(today, d).toMinutes()
+            if (min >= 0) min else Long.MAX_VALUE / 2 - min
+        })
+    }
+
     /** Answer to a freight question written freely ("Goiânia para Anápolis", "goiania-GO anapolis", "tem algo pra Brasília?"). Accents and case are ignored; spelling must be right. */
     data class FreeFrete(val label: String, val messages: List<String>)
 
     /**
      * Two sheet cities in the message: first is the origin, second the destination. One city after "para"/"pra": loads
-     * going there; one city with "carga"/"frete": loads going there, or else leaving it. Up to 3 ready messages.
+     * going there; one city with "carga"/"frete": loads going there, or else leaving it. All their ready messages, nearest pickup first (only the first is sent).
      * Null = not a freight question.
      */
-    fun freteLivre(text: String, rows: List<List<String>>): FreeFrete? {
+    fun freteLivre(text: String, rows: List<List<String>>, now: LocalDateTime = LocalDateTime.now()): FreeFrete? {
         // A load ad (ours echoed by another WhatsApp, or a list) names two cities but asks nothing; answering it loops.
         if (Regex("""origem:[\s\S]*destino:""").containsMatchIn(normalize(text))) return null
         val loads = rows.mapNotNull { row -> rowPlaces(row)?.let { p -> Triple(row, City(words(p[0]), p[1]), City(words(p[2]), p[3])) } }
         if (loads.isEmpty()) return null
         val found = citiesIn(text, loads.flatMap { listOf(it.second, it.third) }.toSet())
-        fun ready(row: List<String>) = (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim()
+        fun ready(hits: List<Triple<List<String>, City, City>>) = nearestFirst(hits.map { it.first }, now).map(::ready).distinct()
         if (found.size >= 2) {
             val from = found[0].map { it.key }; val to = found[1].map { it.key }
             val hits = loads.filter { it.second.key in from && it.third.key in to }
             val label = (hits.firstOrNull()?.let { it.second.label + " → " + it.third.label }) ?: (found[0][0].label + " → " + found[1][0].label)
-            return FreeFrete(label, hits.map { ready(it.first) }.distinct().take(3))
+            return FreeFrete(label, ready(hits))
         }
         if (found.size == 1) {
             val t = normalize(text)
@@ -359,7 +383,7 @@ object Engine {
             val asksLoad = Regex("""\b(carga|cargas|frete|fretes)\b""").containsMatchIn(t)
             if (!toCity && !asksLoad) return null
             val hits = loads.filter { it.third.key in keys }.ifEmpty { if (asksLoad) loads.filter { it.second.key in keys } else emptyList() }
-            return FreeFrete(found[0][0].label, hits.map { ready(it.first) }.distinct().take(3))
+            return FreeFrete(found[0][0].label, ready(hits))
         }
         return null
     }
@@ -370,7 +394,7 @@ object Engine {
      * Null when the message is not a FreteBras one.
      */
     fun frete(text: String, rows: List<List<String>>, notFound: String): String? =
-        freteRoute(text)?.let { freteMessage(it, rows) ?: notFound.ifBlank { null } }
+        freteRoute(text)?.let { freteMessage(it, rows, LocalDateTime.now()) ?: notFound.ifBlank { null } }
 
     /** Diagnostic: sends the sheet's first route (column A) through the FreteBras matcher. Null = no route in the sheet. */
     fun freteSelfTest(rows: List<List<String>>): Pair<String, Boolean>? {
@@ -379,10 +403,10 @@ object Engine {
     }
 
     /** Ready message of the sheet row for this route, or null when the route is not in the sheet. */
-    fun freteMessage(r: Route, rows: List<List<String>>): String? {
-        val hits = rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }
+    fun freteMessage(r: Route, rows: List<List<String>>, now: LocalDateTime): String? {
+        val hits = nearestFirst(rows.filter { rowRoute(it)?.let { x -> x.from == r.from && x.to == r.to } == true }, now)
         val best = hits.firstOrNull { r.cargo.isNotEmpty() && hasWord(normalize(it.joinToString(" ")), r.cargo) } ?: hits.firstOrNull()
-        return best?.let { row -> (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim() }
+        return best?.let(::ready)
     }
 
     private fun col(letter: String) = (letter.trim().uppercase().firstOrNull() ?: 'A') - 'A'

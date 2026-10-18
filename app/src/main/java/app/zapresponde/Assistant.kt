@@ -130,12 +130,16 @@ object Assistant {
             putJsonObject("generationConfig") { if (jsonOut) put("responseMimeType", "application/json"); put("temperature", 0.2) }
         }
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true
+            connectTimeout = 20_000; readTimeout = 120_000; requestMethod = "POST"; doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
             setRequestProperty("x-goog-api-key", key.trim())
         }
-        c.outputStream.use { it.write(body.toString().toByteArray()) }
-        val code = c.responseCode
+        val code = try {
+            c.outputStream.use { it.write(body.toString().toByteArray()) }
+            c.responseCode
+        } catch (e: java.net.SocketTimeoutException) {
+            throw Retry("O Gemini demorou demais para responder. Tente de novo em alguns minutos.")
+        }
         val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
         when {
             code == 400 && "API key" in text -> error("Chave do Gemini inválida. Confira em Ajustes > Assistente de IA.")
