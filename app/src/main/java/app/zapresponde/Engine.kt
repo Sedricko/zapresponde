@@ -25,15 +25,29 @@ object Engine {
         random: Random = Random.Default,
         phoneNames: Set<String> = emptySet(),
     ): Decision {
+        val t = mutableListOf<String>()
+        return decide(msg, now, nowMs, cfg, rules, consulta, state, random, phoneNames, t).copy(trace = t)
+    }
+
+    /** [t] collects each step taken, in order: the "caminho da decisão" shown by the diagnostic and sent to the AI. */
+    private fun decide(
+        msg: Incoming, now: LocalDateTime, nowMs: Long, cfg: Config, rules: List<Rule>, consulta: List<List<String>>,
+        state: State, random: Random, phoneNames: Set<String>, t: MutableList<String>,
+    ): Decision {
         if (!cfg.enabled) return skip("Respostas automáticas desligadas")
+        t += "✅ Respostas automáticas ligadas"
         // Answering this would send the bot's reply to the contact because *you* wrote; ReplyService treats it as takeover.
         if (msg.fromMe) return skip("Mensagem enviada por você na conversa")
+        t += "✅ Mensagem de outra pessoa (${if (msg.isGroup) "grupo ${msg.chat}" else msg.sender})"
         if (cfg.contactsOn) audience(msg, cfg, phoneNames)?.let { return skip(it) }
+        t += if (cfg.contactsOn) "✅ Contato permitido pelo filtro de contatos" else "ℹ️ Filtro de contatos desligado"
         if (cfg.scheduleOn && !inWindow(cfg.scheduleHours, cfg.scheduleDays, now)) return skip("Fora da agenda")
+        t += if (cfg.scheduleOn) "✅ Dentro da agenda (${cfg.scheduleHours})" else "ℹ️ Agenda desligada"
         val cs = state.chats.getOrPut(msg.chat) { ChatState() }
         if (cs.pauseUntil > nowMs) return skip("Conversa pausada")
         // A message equal to something we just sent is our own reply echoed back in the notification.
         if (msg.text in cs.lastTexts) return skip("Mensagem é uma resposta nossa")
+        t += "✅ Conversa não pausada e mensagem não é eco de resposta nossa"
         if (cfg.loopGuardOn) {
             cs.recentReplies.removeAll { nowMs - it > LOOP_WINDOW }
             if (cs.recentReplies.size >= LOOP_MAX) {
@@ -41,6 +55,7 @@ object Engine {
                 cs.recentReplies.clear()
                 return skip("Proteção contra loop: conversa pausada por 30 min")
             }
+            t += "✅ Proteção contra loop: ${cs.recentReplies.size} de $LOOP_MAX respostas nos últimos 2 min"
         }
 
         val out = mutableListOf<String>()
@@ -66,20 +81,29 @@ object Engine {
             }
             if (splitList(cfg.formTrigger).any { norm.contains(normalize(it)) }) {
                 cs.formStep = 0
+                t += "✅ Pedido pela conversa: palavra de início encontrada"
                 return finish(msg, now, cfg, cs, nowMs, listOf(questions[0]), "Pedido", null, random)
             }
+            t += "ℹ️ Pedido pela conversa: nenhuma palavra de início (${cfg.formTrigger})"
         }
 
         // Before the welcome: a FreteBras driver is a new contact, and should get only the freight answer.
+        if (!cfg.freteOn) t += "ℹ️ Fretes desligado"
         if (cfg.freteOn) freteRoute(msg.text)?.let { route ->
             val found = freteMessage(route, consulta)
+            t += "✅ Anúncio FreteBras, rota ${route.label}: " + if (found != null) "carga achada na planilha" else "rota fora da planilha"
             val reply = found ?: cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha")
             return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes", null, random).copy(
                 leadRow = listOf(msg.sender, route.label, route.cargo.uppercase(), if (found != null) "disponível" else "indisponível"),
                 alert = if (found != null) "${msg.sender} quer a carga ${route.label}" else null,
             )
         }
-        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta)?.let { f ->
+        if (cfg.freteOn) t += "ℹ️ Não é anúncio FreteBras"
+        if (cfg.freteOn && !cfg.freteLivreOn) t += "ℹ️ Frete escrito de qualquer jeito desligado"
+        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta).also { f ->
+            t += if (f == null) "ℹ️ Frete escrito: não é pedido de frete (nenhuma cidade da planilha, anúncio de carga, ou uma cidade só sem \"para\"/\"carga\")"
+            else "✅ Frete escrito: entendi ${f.label}, ${f.messages.size} carga(s) na planilha"
+        }?.let { f ->
             val reply = when (f.messages.size) {
                 0 -> cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
                 1 -> f.messages[0]
@@ -100,13 +124,19 @@ object Engine {
                 out += cfg.welcomeText
                 ruleName = "Boas-vindas"
             }
+            t += if (due) "✅ Boas-vindas: primeiro contato${if (cfg.welcomeDaily) " do dia" else ""}" else "ℹ️ Boas-vindas: já enviada antes"
         }
 
         val why = mutableListOf<String>()
+        if (rules.none { it.enabled }) t += "ℹ️ Nenhuma regra ativa"
         for (r in rules) {
-            if (!r.enabled || !matches(r, msg.text)) continue
-            if (!allowed(r, msg)) { why += "${r.name}: contato ou grupo não permitido"; continue }
-            if (!inWindow(r.hours, r.days, now)) { why += "${r.name}: fora do horário da regra"; continue }
+            if (!r.enabled) continue
+            if (!matches(r, msg.text)) {
+                t += "❌ Regra ${r.name}: não casou (${r.match.label}${if (r.match != Match.ALL) ": ${r.keywords}" else ""}${if (r.exclude.isNotBlank()) "; exceto: ${r.exclude}" else ""})"
+                continue
+            }
+            if (!allowed(r, msg)) { why += "${r.name}: contato ou grupo não permitido"; t += "❌ Regra " + why.last(); continue }
+            if (!inWindow(r.hours, r.days, now)) { why += "${r.name}: fora do horário da regra"; t += "❌ Regra " + why.last(); continue }
             val st = cs.rules.getOrPut(r.id) { longArrayOf(0, 0) }
             val ok = when (r.freq) {
                 Freq.ALWAYS -> true
@@ -114,12 +144,13 @@ object Engine {
                 Freq.INTERVAL -> st[0] == 0L || nowMs - st[1] >= r.intervalMin * 60_000L
                 Freq.MAX -> st[0] < r.maxReplies
             }
-            if (!ok) { why += "${r.name}: limite de frequência (${r.freq.label})"; continue }
+            if (!ok) { why += "${r.name}: limite de frequência (${r.freq.label})"; t += "❌ Regra " + why.last(); continue }
             val replies = when (r.kind) {
                 Kind.TEXT -> pick(r, random)
                 Kind.LOOKUP -> listOfNotNull(lookup(r, msg.text, consulta))
             }.filter { it.isNotBlank() }
-            if (replies.isEmpty()) { why += "${r.name}: consulta sem resultado"; continue }
+            if (replies.isEmpty()) { why += "${r.name}: consulta sem resultado"; t += "❌ Regra " + why.last(); continue }
+            t += "✅ Regra ${r.name}: casou (${r.match.label}${if (r.match != Match.ALL) ": ${r.keywords}" else ""}) e respondeu"
             st[0]++; st[1] = nowMs
             out += replies
             ruleName = if (ruleName.isEmpty()) r.name else "$ruleName + ${r.name}"

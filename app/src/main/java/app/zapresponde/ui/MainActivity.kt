@@ -671,6 +671,8 @@ fun MoreTab(open: (String) -> Unit) {
         FeatureRow(Icons.Default.Refresh, "Backup", "Exportar e importar configurações e regras", null) { open("backup") }
         Divider()
         FeatureRow(Icons.Default.Info, "Diagnóstico", "Testa tudo e mostra por que não respondeu", null) { open("help") }
+        Divider()
+        FeatureRow(Icons.Default.Face, "Diagnóstico pela IA", "O Gemini lê o relatório e explica cada decisão", c.aiDiagOn, { on -> cfg { copy(aiDiagOn = on) } }) { open("help") }
     }
     val ctx = LocalContext.current
     Hint("ZapResponde versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
@@ -1075,6 +1077,35 @@ fun HelpScreen() {
             }, Modifier.fillMaxWidth()) { Text("Compartilhar relatório") }
         }
     }
+    val c = Store.config
+    var question by rememberSaveable { mutableStateOf("") }
+    var answer by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    Panel("Diagnóstico pela IA") {
+        SwitchRow("Ativar diagnóstico pela IA", c.aiDiagOn, "O relatório, com o texto das últimas mensagens, vai para o Gemini") { cfg { copy(aiDiagOn = it) } }
+        if (c.aiDiagOn) {
+            Field("Pergunta (opcional)", question, 2, help = "Ex.: por que respondeu várias vezes para o Meu?") { question = it }
+            Button({
+                busy = true; answer = "Rodando o diagnóstico e perguntando ao Gemini..."
+                scope.launch {
+                    answer = runCatching {
+                        withContext(Dispatchers.IO) {
+                            report = diagnose(ctx)
+                            Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report, c, Store.allRules(), question), jsonOut = false)
+                        }
+                    }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
+                    busy = false
+                }
+            }, Modifier.fillMaxWidth(), enabled = c.aiKey.isNotBlank() && !busy) { Icon(Icons.Default.Face, null); Spacer(Modifier.width(6.dp)); Text("Pedir análise à IA") }
+            if (c.aiKey.isBlank()) Hint("Cole a chave do Gemini em Ajustes > Assistente de IA.")
+            if (answer.isNotEmpty()) {
+                Text(answer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+                if (!busy) OutlinedButton({
+                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, answer + "\n\n" + report), "Enviar análise"))
+                }, Modifier.fillMaxWidth()) { Text("Compartilhar análise e relatório") }
+            }
+        }
+    }
     Panel("Ações") {
         FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp", "Precisam estar ligadas para o app responder", null) {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
@@ -1154,7 +1185,11 @@ private fun diagnose(ctx: android.content.Context): String {
 
     l += ""; l += "— Últimas mensagens recebidas"
     if (Store.events.isEmpty()) l += "(nenhuma)"
-    Store.events.take(15).forEach { e -> l += "${fmt(e.time)} · ${e.chat}: \"${e.text.take(50).replace('\n', ' ')}\" → ${e.result}" }
+    Store.events.take(15).forEachIndexed { i, e ->
+        l += "${fmt(e.time)} · ${e.chat}: \"${e.text.take(50).replace('\n', ' ')}\" → ${e.result}"
+        // The 5 newest also show the path of the decision, step by step.
+        if (i < 5) e.trace.forEach { l += "      $it" }
+    }
     val causa = when {
         !NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) ->
             "O acesso às notificações está desligado. Se o botão estiver cinza: Android > Apps > ZapResponde > ⋮ > Permitir configurações restritas."

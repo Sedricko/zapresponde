@@ -246,5 +246,10 @@ class EngineTest {
         assertEquals(listOf("indisponível"), run(msg("Anápolis para Goiânia"), listOf(rule), cfg, consulta = sheet).replies)
         assertTrue(run(msg("tem algo pra Brasilia?"), listOf(rule), cfg, consulta = sheet).replies[0].startsWith("Achei 2 cargas para BRASILIA/DF"))
         assertEquals(listOf("regra"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg.copy(freteLivreOn = false), consulta = sheet).replies)
+        val tr = run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).trace
+        assertTrue(tr.toString(), tr.any { "Frete escrito: entendi GOIANIA/GO → ANAPOLIS/GO, 1 carga" in it })
+        val tr2 = run(msg("oi"), listOf(rule.copy(name = "Oi", match = Match.CONTAINS, keywords = "tchau"), rule.copy(name = "Tudo")), cfg, consulta = sheet).trace
+        assertTrue(tr2.toString(), tr2.any { it.startsWith("❌ Regra Oi: não casou (Contém: tchau)") } && tr2.last().startsWith("✅ Regra Tudo: casou"))
+        assertTrue(Assistant.diagnosisPrompt("REL", cfg.copy(aiKey = "SEGREDO"), listOf(rule), "").let { "REL" in it && "SEGREDO" !in it })
     }
 }

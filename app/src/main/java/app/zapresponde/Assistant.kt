@@ -1,5 +1,6 @@
 package app.zapresponde
 
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -81,18 +82,38 @@ object Assistant {
     /** Confere cada exemplo só pelas palavras (horário, contatos e frequência dependem da hora e de quem manda). */
     fun check(d: Draft): List<Pair<Example, Boolean>> = d.examples.map { it to (Engine.matches(d.rule, it.text) == it.shouldReply) }
 
+    /** Diagnóstico pela IA: o relatório (com o caminho de cada decisão), as regras e os ajustes, sem chaves nem link da planilha. */
+    fun diagnosisPrompt(report: String, cfg: Config, rules: List<Rule>, question: String): String = buildString {
+        append("""
+            Você analisa o app ZapResponde, que responde o WhatsApp sozinho lendo as notificações do Android.
+            Ordem de decisão para cada mensagem: robô ligado; mensagem não é sua; filtro de contatos; agenda; conversa pausada;
+            eco de resposta nossa; proteção contra loop; pedido pela conversa; Fretes FreteBras (frase "frete de X/UF para Y/UF" ou link);
+            frete escrito de qualquer jeito (cidades da planilha de cargas: 1ª origem, 2ª destino); boas-vindas; regras (a primeira que servir).
+            "Você" e "Meu" são contatos normais (outro número do dono). O caminho de cada decisão vem no relatório, linha a linha.
+            Responda em português simples, para quem não é programador, em texto puro (sem markdown):
+            1) para cada mensagem recente que pareça errada (respondeu o que não devia, não respondeu o que devia, respondeu várias vezes), diga o que aconteceu e por quê;
+            2) se a decisão do app foi correta ou não;
+            3) o que mudar, apontando o botão ou a regra exata em Ajustes. Se parecer defeito do app, diga "possível defeito do app" e descreva.
+            Não invente: use só o que está abaixo.
+        """.trimIndent())
+        if (question.isNotBlank()) append("\n\nPergunta do dono: ").append(question.trim())
+        append("\n\nAjustes:\n").append(json.encodeToString(Config.serializer(), cfg.copy(aiKey = "", sheetUrl = "", sheetKey = "")))
+        append("\n\nRegras:\n").append(json.encodeToString(ListSerializer(Rule.serializer()), rules))
+        append("\n\nRelatório:\n").append(report)
+    }
+
     /** Modelos tentados depois do escolhido, quando ele está sobrecarregado, sem cota ou não existe. */
     private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
 
     private class Retry(msg: String) : Exception(msg)
 
     /** Chama o Gemini e devolve o texto da resposta, tentando de novo e trocando de modelo quando o Google está ocupado. */
-    fun gemini(key: String, model: String, prompt: String): String {
+    fun gemini(key: String, model: String, prompt: String, jsonOut: Boolean = true): String {
         var last = "O Gemini não respondeu."
         for (m in (listOf(model.trim()) + FALLBACK).filter { it.isNotEmpty() }.distinct()) {
             repeat(2) { attempt ->
                 try {
-                    return call(key, m, prompt)
+                    return call(key, m, prompt, jsonOut)
                 } catch (e: Retry) {
                     last = e.message.orEmpty()
                     if (attempt == 0 && "sobrecarregado" in last) Thread.sleep(2_000) else return@repeat
@@ -102,11 +123,11 @@ object Assistant {
         error(last)
     }
 
-    private fun call(key: String, model: String, prompt: String): String {
+    private fun call(key: String, model: String, prompt: String, jsonOut: Boolean): String {
         val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
         val body = buildJsonObject {
             putJsonArray("contents") { addJsonObject { put("role", "user"); putJsonArray("parts") { addJsonObject { put("text", prompt) } } } }
-            putJsonObject("generationConfig") { put("responseMimeType", "application/json"); put("temperature", 0.2) }
+            putJsonObject("generationConfig") { if (jsonOut) put("responseMimeType", "application/json"); put("temperature", 0.2) }
         }
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000; readTimeout = 60_000; requestMethod = "POST"; doOutput = true

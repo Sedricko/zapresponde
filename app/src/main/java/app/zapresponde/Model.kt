@@ -102,6 +102,8 @@ data class Config(
     /** Chave da API do Gemini; fica fora do backup. */
     val aiKey: String = "",
     val aiModel: String = "gemini-flash-latest",
+    /** Diagnóstico pela IA: manda o relatório (com textos das mensagens) ao Gemini para explicar as decisões. */
+    val aiDiagOn: Boolean = false,
 )
 
 @Serializable
@@ -145,4 +147,6 @@ data class Decision(
     val leadRow: List<String>? = null,
     /** Text of the phone alert for an available load. */
     val alert: String? = null,
+    /** Every step of the decision, for the diagnostic and the AI review. */
+    val trace: List<String> = emptyList(),
 )

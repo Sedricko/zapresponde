@@ -114,7 +114,7 @@ class ReplyService : NotificationListenerService() {
             ).also { Store.saveState() }
         }
         Log.d(TAG, "${msg.chat}: ${d.reason}")
-        if (d.replies.isEmpty()) { Store.log(msg.chat, msg.text, d.reason); return }
+        if (d.replies.isEmpty()) { Store.log(msg.chat, msg.text, d.reason, d.trace); return }
         val open = sbn.notification.contentIntent
         if (cfg.alertOn) d.alert?.let { Alerts.show(this, "Carga pedida", it, open) }
 
@@ -122,7 +122,7 @@ class ReplyService : NotificationListenerService() {
         if (cfg.approvalOn && (list.isEmpty() || Engine.normalize(msg.chat) in list)) {
             val id = nextId++
             approvals[id] = Approval(msg, action, sbn.packageName, d, before)
-            Store.log(msg.chat, msg.text, "Aguardando sua aprovação (${d.rule})")
+            Store.log(msg.chat, msg.text, "Aguardando sua aprovação (${d.rule})", d.trace)
             Alerts.approval(this, id, msg.chat, d.replies.joinToString("\n---\n"), open)
             return
         }
@@ -168,7 +168,7 @@ class ReplyService : NotificationListenerService() {
                 throw e
             }
             pending.remove(msg.chat)
-            Store.log(msg.chat, msg.text, "Respondido (${d.rule})")
+            Store.log(msg.chat, msg.text, "Respondido (${d.rule})", d.trace)
             val entry = HistoryEntry(
                 System.currentTimeMillis(), APPS[pkg] ?: pkg, msg.chat, msg.isGroup,
                 msg.text, d.replies.joinToString("\n---\n"), d.rule,
