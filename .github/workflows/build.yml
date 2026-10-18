@@ -14,7 +14,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - run: gradle --no-daemon testDebugUnitTest assembleDebug
+      # Compile errors and failed tests also become annotations, readable through the API when the log download is blocked.
+      - run: |
+          set -o pipefail
+          gradle --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee build.log || {
+            grep -E "^e: |FAILED|AssertionError|Exception" build.log | head -20 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ZapResponde-apk
