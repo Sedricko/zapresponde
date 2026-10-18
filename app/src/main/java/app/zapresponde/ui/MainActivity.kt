@@ -916,6 +916,10 @@ fun FreteScreen() {
     val c = Store.config
     Panel {
         SwitchRow("Ativar respostas de fretes", c.freteOn) { cfg { copy(freteOn = it) } }
+        SwitchRow(
+            "Entender frete escrito de qualquer jeito", c.freteLivreOn,
+            "\"Goiânia para Anápolis\", \"goiania-GO anapolis\", \"tem carga pra Brasília?\": a 1ª cidade é a origem e a 2ª o destino",
+        ) { cfg { copy(freteLivreOn = it) } }
         Divider()
         SwitchRow("Gravar na aba Leads", c.leadsOn, "Data, motorista, rota, carga e se estava disponível") { cfg { copy(leadsOn = it) } }
         SwitchRow("Alerta de carga pedida", c.alertOn, "Notificação no celular quando a carga pedida está disponível; tocar abre a conversa") { cfg { copy(alertOn = it) } }

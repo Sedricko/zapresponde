@@ -79,6 +79,18 @@ object Engine {
                 alert = if (found != null) "${msg.sender} quer a carga ${route.label}" else null,
             )
         }
+        if (cfg.freteOn && cfg.freteLivreOn) freteLivre(msg.text, consulta)?.let { f ->
+            val reply = when (f.messages.size) {
+                0 -> cfg.freteNotFound.ifBlank { null } ?: return skip("Frete fora da planilha (${f.label})")
+                1 -> f.messages[0]
+                else -> "Achei ${f.messages.size} cargas para ${f.label}:\n\n" + f.messages.joinToString("\n\n")
+            }
+            val ok = f.messages.isNotEmpty()
+            return finish(msg, now, cfg, cs, nowMs, listOf(reply), "Fretes (texto livre)", null, random).copy(
+                leadRow = listOf(msg.sender, f.label, "", if (ok) "disponível" else "indisponível"),
+                alert = if (ok) "${msg.sender} quer a carga ${f.label}" else null,
+            )
+        }
 
         if (cfg.welcomeOn) {
             val today = now.toLocalDate().toString()
@@ -242,18 +254,81 @@ object Engine {
     }
 
     /** Route of a freight-sheet row: column A "Origem/UF para Destino/UF", or the ORIGEM:/DESTINO: lines of the message. */
-    private fun rowRoute(row: List<String>): Route? {
+    private fun rowRoute(row: List<String>): Route? =
+        rowPlaces(row)?.let { (c1, u1, c2, u2) -> Route(place(c1, u1), place(c2, u2), label = label(c1, u1, c2, u2)) }
+
+    /** Origin city, origin UF, destination city, destination UF of a freight-sheet row (normalized). */
+    private fun rowPlaces(row: List<String>): List<String>? {
         val a = normalize(row.firstOrNull().orEmpty())
-        Regex("""^([^/]+)/([a-z]{2}) para ([^/]+)/([a-z]{2})""").find(a)?.let { m ->
-            val g = m.groupValues
-            return Route(place(g[1], g[2]), place(g[3], g[4]))
-        }
+        Regex("""^([^/]+)/([a-z]{2}) para ([^/]+)/([a-z]{2})""").find(a)?.let { return it.groupValues.drop(1) }
         val all = normalize(row.joinToString("\n"))
         // A list of many loads ("Gerar Lista") is not one load: only rows with a single ORIGEM count.
         if (Regex("origem:").findAll(all).count() != 1) return null
         val o = Regex("""origem:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
         val d = Regex("""destino:\W*([^/\n]+)/([a-z]{2})""").find(all)?.groupValues ?: return null
-        return Route(place(o[1], o[2]), place(d[1], d[2]))
+        return listOf(o[1], o[2], d[1], d[2])
+    }
+
+    /** A city of the freight sheet: its words and UF; [key] is the same as [place]. */
+    private data class City(val words: List<String>, val uf: String) {
+        val key get() = words.joinToString("") + uf
+        val label get() = words.joinToString(" ").uppercase() + "/" + uf.uppercase()
+    }
+
+    private fun words(s: String) = normalize(s).split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
+
+    /**
+     * Sheet cities named in the message, in order. Each entry holds every city that fits at that spot
+     * (the same name can exist in two states); a UF written right after it narrows the choice.
+     */
+    private fun citiesIn(text: String, cities: Collection<City>): List<List<City>> {
+        val t = words(text)
+        val byLength = cities.sortedByDescending { it.words.size }
+        val out = mutableListOf<List<City>>()
+        var i = 0
+        while (i < t.size) {
+            val hits = byLength.filter { c -> i + c.words.size <= t.size && c.words.indices.all { k -> t[i + k] == c.words[k] } }
+            if (hits.isEmpty()) { i++; continue }
+            // The longest name wins: "aparecida de goiania" is not "goiania".
+            val n = hits.first().words.size
+            val same = hits.filter { it.words.size == n }
+            val uf = t.getOrNull(i + n)?.takeIf { it.length == 2 }
+            out += same.filter { it.uf == uf }.ifEmpty { same }
+            i += n + if (uf != null && same.any { it.uf == uf }) 1 else 0
+        }
+        return out
+    }
+
+    /** Answer to a freight question written freely ("Goiânia para Anápolis", "goiania-GO anapolis", "tem algo pra Brasília?"). Accents and case are ignored; spelling must be right. */
+    data class FreeFrete(val label: String, val messages: List<String>)
+
+    /**
+     * Two sheet cities in the message: first is the origin, second the destination. One city after "para"/"pra": loads
+     * going there; one city with "carga"/"frete": loads going there, or else leaving it. Up to 3 ready messages.
+     * Null = not a freight question.
+     */
+    fun freteLivre(text: String, rows: List<List<String>>): FreeFrete? {
+        val loads = rows.mapNotNull { row -> rowPlaces(row)?.let { p -> Triple(row, City(words(p[0]), p[1]), City(words(p[2]), p[3])) } }
+        if (loads.isEmpty()) return null
+        val found = citiesIn(text, loads.flatMap { listOf(it.second, it.third) }.toSet())
+        fun ready(row: List<String>) = (row.drop(1).maxByOrNull { it.length } ?: row[0]).trim()
+        if (found.size >= 2) {
+            val from = found[0].map { it.key }; val to = found[1].map { it.key }
+            val hits = loads.filter { it.second.key in from && it.third.key in to }
+            val label = (hits.firstOrNull()?.let { it.second.label + " → " + it.third.label }) ?: (found[0][0].label + " → " + found[1][0].label)
+            return FreeFrete(label, hits.map { ready(it.first) }.distinct().take(3))
+        }
+        if (found.size == 1) {
+            val t = normalize(text)
+            val keys = found[0].map { it.key }
+            // "pra Brasília" asks for loads going there; "carga" or "frete" with a city also accepts loads leaving it.
+            val toCity = Regex("""\b(para|pra|p)\W+""" + found[0][0].words.joinToString("""\W+""")).containsMatchIn(t)
+            val asksLoad = Regex("""\b(carga|cargas|frete|fretes)\b""").containsMatchIn(t)
+            if (!toCity && !asksLoad) return null
+            val hits = loads.filter { it.third.key in keys }.ifEmpty { if (asksLoad) loads.filter { it.second.key in keys } else emptyList() }
+            return FreeFrete(found[0][0].label, hits.map { ready(it.first) }.distinct().take(3))
+        }
+        return null
     }
 
     /**

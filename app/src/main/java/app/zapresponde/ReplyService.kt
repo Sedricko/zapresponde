@@ -88,7 +88,9 @@ class ReplyService : NotificationListenerService() {
             Store.log(msg.chat, msg.text, "Mensagem sua: conversa pausada por ${cfg.takeoverMin} min")
         }
         // The freight sheet changes all the time; read it fresh so a new load is not answered as "indisponível".
-        if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && Engine.freteRoute(msg.text) != null) {
+        if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && (Engine.freteRoute(msg.text) != null ||
+                (cfg.freteLivreOn && Engine.freteLivre(msg.text, Store.sheet.consulta) != null))
+        ) {
             scope.launch {
                 withContext(Dispatchers.IO) {
                     runCatching { Sheets.refresh(cfg, fast = true) }.onFailure {

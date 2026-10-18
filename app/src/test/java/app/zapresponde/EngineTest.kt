@@ -214,4 +214,34 @@ class EngineTest {
         assertTrue(runCatching { Assistant.parse("não sei") }.isFailure)
         assertTrue(Assistant.prompt("muda o horário", d.rule).contains("\"name\":\"Preço\""))
     }
+
+    @Test fun freteLivre() {
+        val sheet = listOf(
+            listOf("ONLINE | ATUALIZAÇÃO: 11:49:26", ""),
+            listOf("Goiânia/GO para Anápolis/GO", "carga goiania anapolis"),
+            listOf("Goiânia/GO para Aparecida de Goiânia/GO", "carga aparecida"),
+            listOf("São Paulo/SP para Serra/ES", "carga sp serra"),
+            listOf("Anápolis/GO para Brasília/DF", "carga brasilia 1"),
+            listOf("Goiânia/GO para Brasília/DF", "carga brasilia 2"),
+        )
+        for (t in listOf(
+            "Goiânia/GO para Anápolis/GO", "Goiânia para Anápolis", "Goiânia-GO para Anápolis-GO",
+            "Goiânia - GO para Anápolis - GO", "Goiânia/GO Anápolis/GO", "Goiânia Anápolis", "eu to em goiania quero ir para anapolis",
+        )) assertEquals(t, listOf("carga goiania anapolis"), Engine.freteLivre(t, sheet)!!.messages)
+        assertEquals(listOf("carga aparecida"), Engine.freteLivre("Goiania/GO para Aparecida de Goiania", sheet)!!.messages)
+        assertEquals(listOf("carga sp serra"), Engine.freteLivre("Sao paulo para Serra", sheet)!!.messages)
+        assertEquals(listOf("carga brasilia 1", "carga brasilia 2"), Engine.freteLivre("tem algo pra Brasilia?", sheet)!!.messages)
+        assertEquals(emptyList<String>(), Engine.freteLivre("Anápolis para Goiânia", sheet)!!.messages)
+        assertEquals(null, Engine.freteLivre("goinaia para anapolis", sheet))
+        assertEquals(null, Engine.freteLivre("vou de Goiania para casa", sheet))
+        assertEquals(listOf("carga goiania anapolis", "carga aparecida", "carga brasilia 2"), Engine.freteLivre("tem carga saindo de goiania?", sheet)!!.messages)
+        assertEquals(listOf("carga goiania anapolis"), Engine.freteLivre("GOIANIA PARA ANAPOLIS", sheet)!!.messages)
+        assertEquals(null, Engine.freteLivre("Boa noite, estou em Goiânia", sheet))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true, freteNotFound = "indisponível")
+        val rule = Rule(match = Match.ALL, replies = listOf("regra"))
+        assertEquals(listOf("carga goiania anapolis"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg, consulta = sheet).replies)
+        assertEquals(listOf("indisponível"), run(msg("Anápolis para Goiânia"), listOf(rule), cfg, consulta = sheet).replies)
+        assertTrue(run(msg("tem algo pra Brasilia?"), listOf(rule), cfg, consulta = sheet).replies[0].startsWith("Achei 2 cargas para BRASILIA/DF"))
+        assertEquals(listOf("regra"), run(msg("Goiânia para Anápolis"), listOf(rule), cfg.copy(freteLivreOn = false), consulta = sheet).replies)
+    }
 }

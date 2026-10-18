@@ -83,6 +83,8 @@ data class Config(
     val contactsList: String = "",
     val groupsOn: Boolean = true,
     val freteOn: Boolean = false,
+    /** Fretes escritos livremente ("Goiânia para Anápolis"), reconhecendo as cidades da planilha de cargas. */
+    val freteLivreOn: Boolean = false,
     val leadsOn: Boolean = false,
     val alertOn: Boolean = false,
     val backupAutoOn: Boolean = false,
