@@ -96,6 +96,10 @@ data class Config(
     val sheetSyncMin: Int = 15,
     val sheetRulesOn: Boolean = true,
     val sheetLogOn: Boolean = true,
+    val aiOn: Boolean = false,
+    /** Chave da API do Gemini; fica fora do backup. */
+    val aiKey: String = "",
+    val aiModel: String = "gemini-flash-latest",
 )
 
 @Serializable

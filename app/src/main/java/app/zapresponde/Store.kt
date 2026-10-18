@@ -82,13 +82,13 @@ object Store {
         tmp.renameTo(File(dir, name))
     }
 
-    fun exportBackup(): String = json.encodeToString(Backup(config = config, rules = rules))
+    fun exportBackup(): String = json.encodeToString(Backup(config = config.copy(aiKey = ""), rules = rules))
 
     /** Replaces settings and rules with a backup file's; throws with a readable message if it isn't one. */
     fun importBackup(text: String) {
         val b = runCatching { json.decodeFromString<Backup>(text) }.getOrNull()
         require(b != null && b.app == "ZapResponde") { "Esse arquivo não é um backup do ZapResponde." }
-        updateConfig(b.config); updateRules(b.rules)
+        updateConfig(b.config.copy(aiKey = config.aiKey)); updateRules(b.rules)
     }
 
     @Synchronized

@@ -198,4 +198,20 @@ class EngineTest {
         assertTrue(run(msg("oi"), listOf(soGrupo)).reason.contains("não permitido"))
         assertEquals("Nenhuma regra serviu", run(msg("oi"), emptyList()).reason)
     }
+
+    @Test fun assistantDraft() {
+        val ai = """Claro! {"rule": {"name": "Preço", "match": "CONTAINS", "keywords": "preço, valor", "replies": ["A partir de R$ 50"],
+            "freq": "ONCE", "hours": "08:00-18:00", "days": [1,2,3,4,5], "inventado": 1},
+            "testes": [{"mensagem": "qual o preço?", "responde": true}, {"mensagem": "bom dia", "responde": false}]}"""
+        val d = Assistant.parse(ai)
+        assertEquals("Preço", d.rule.name)
+        assertEquals(Freq.ONCE, d.rule.freq)
+        assertEquals(setOf(1, 2, 3, 4, 5), d.rule.days)
+        assertTrue(d.problems.isEmpty())
+        assertTrue(Assistant.check(d).all { it.second })
+        assertTrue(Assistant.problems(d.rule.copy(hours = "8h às 18h", replies = listOf(""))).size == 2)
+        assertTrue(runCatching { Assistant.parse("""{"rule": {"match": "QUALQUER"}}""") }.isFailure)
+        assertTrue(runCatching { Assistant.parse("não sei") }.isFailure)
+        assertTrue(Assistant.prompt("muda o horário", d.rule).contains("\"name\":\"Preço\""))
+    }
 }

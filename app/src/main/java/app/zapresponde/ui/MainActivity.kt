@@ -110,6 +110,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import app.zapresponde.Assistant
 import app.zapresponde.Audience
 import app.zapresponde.Config
 import app.zapresponde.Contacts
@@ -164,7 +165,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "test" to "Testar respostas", "help" to "Diagnóstico",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -203,6 +204,7 @@ fun App() {
                     "approval" -> ApprovalScreen()
                     "frete" -> FreteScreen()
                     "test" -> TestScreen()
+                    "ai" -> AssistantScreen()
                     "help" -> HelpScreen()
                 }
             }
@@ -662,6 +664,8 @@ fun MoreTab(open: (String) -> Unit) {
         FeatureRow(Icons.Default.Person, "Contatos", AUDIENCE[c.contactsMode].orEmpty() + if (c.groupsOn) " · grupos sim" else " · grupos não", c.contactsOn, { on -> cfg { copy(contactsOn = on) } }) { open("contacts") }
     }
     Panel("Ferramentas") {
+        FeatureRow(Icons.Default.Face, "Assistente de IA", "Descreva a regra e o Gemini monta, testa e você aplica", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
+        Divider()
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
         Divider()
         FeatureRow(Icons.Default.Refresh, "Backup", "Exportar e importar configurações e regras", null) { open("backup") }
@@ -920,6 +924,80 @@ fun FreteScreen() {
     }
     Panel {
         Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, usa a do mesmo tipo de carga. A planilha precisa estar ligada em Planilha > Google Sheets; sem isso, o app usa a última cópia das cargas, que não atualiza.")
+    }
+}
+
+@Composable
+fun AssistantScreen() {
+    val c = Store.config
+    val scope = rememberCoroutineScope()
+    var request by rememberSaveable { mutableStateOf("") }
+    var draft by remember { mutableStateOf<Assistant.Draft?>(null) }
+    var status by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    fun ask() {
+        busy = true; status = "Pedindo ao Gemini..."
+        val current = draft?.rule
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { Assistant.parse(Assistant.gemini(c.aiKey, c.aiModel, Assistant.prompt(request, current))) }
+            }.fold({ draft = it; status = ""; request = "" }, { status = it.message ?: "Falhou: tente de novo." })
+            busy = false
+        }
+    }
+    Panel {
+        SwitchRow("Ativar assistente de IA", c.aiOn) { cfg { copy(aiOn = it) } }
+        Field("Chave da API do Gemini", c.aiKey, help = "Crie grátis em aistudio.google.com/apikey e cole aqui") { cfg { copy(aiKey = it.trim()) } }
+        Advanced { Field("Modelo", c.aiModel, help = "Padrão: gemini-flash-latest") { cfg { copy(aiModel = it.trim()) } } }
+    }
+    Panel(if (draft == null) "O que a regra deve fazer?" else "Quer ajustar alguma coisa?") {
+        Field(
+            if (draft == null) "Pedido" else "Ajuste", request, 3,
+            help = if (draft == null) "Ex.: quando perguntarem preço, responder \"a partir de R$ 50\", de segunda a sexta das 8h às 18h, uma vez por conversa"
+            else "Ex.: muda o horário para 7h às 17h",
+        ) { request = it }
+        Button({ ask() }, Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank() && request.isNotBlank() && !busy) {
+            Icon(Icons.AutoMirrored.Filled.Send, null); Spacer(Modifier.width(6.dp)); Text(if (draft == null) "Criar regra" else "Ajustar regra")
+        }
+        if (status.isNotEmpty()) Text(status, color = if (busy || status.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        if (!c.aiOn || c.aiKey.isBlank()) Hint("Ligue o assistente e cole a chave acima. Só o seu pedido vai para o Gemini; mensagens de clientes não são enviadas.")
+    }
+    draft?.let { d ->
+        val r = d.rule
+        Panel("Regra sugerida") {
+            Text(r.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                listOfNotNull(
+                    r.match.label + if (r.match != Match.ALL) ": ${r.keywords}" else "",
+                    r.exclude.takeIf { it.isNotBlank() }?.let { "Exceto: $it" },
+                    r.freq.label + when (r.freq) { Freq.INTERVAL -> " (${r.intervalMin} min)"; Freq.MAX -> " (${r.maxReplies})"; else -> "" },
+                    "Horário: " + r.hours.ifBlank { "o dia todo" } + if (r.days.size < 7) " · dias ${r.days.sorted().joinToString()}" else "",
+                    "Quem: ${r.who.label} · grupos: ${r.groups.label}",
+                ).joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp),
+            )
+            r.replies.filter { it.isNotBlank() }.forEach {
+                Box(
+                    Modifier.padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp),
+                ) { Text(it, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+            }
+        }
+        val results = Assistant.check(d)
+        Panel("Teste automático") {
+            if (results.isEmpty()) Hint("A IA não mandou exemplos. Use Testar respostas depois de aplicar.")
+            results.forEach { (e, ok) ->
+                Text("${if (ok) "✅" else "❌"} \"${e.text}\" → ${if (e.shouldReply) "deve responder" else "não deve responder"}${if (ok) "" else " (não bateu)"}")
+            }
+            d.problems.forEach { Text("❌ $it", color = MaterialTheme.colorScheme.error) }
+            Hint("O teste confere as palavras. Horário, contatos e frequência valem quando a mensagem real chegar.")
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton({ draft = null; status = "" }, Modifier.weight(1f)) { Text("Descartar") }
+            Button({
+                Store.updateRules(Store.rules + r); draft = null; status = "✅ Regra \"${r.name}\" aplicada. Ela está na aba Regras."
+            }, Modifier.weight(1f), enabled = d.problems.isEmpty()) { Text("Aplicar") }
+        }
+        if (d.problems.isEmpty() && !results.all { it.second }) Hint("Algum teste não bateu: o melhor é pedir um ajuste antes de aplicar.")
     }
 }
 
