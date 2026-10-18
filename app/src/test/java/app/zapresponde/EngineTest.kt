@@ -289,4 +289,34 @@ class EngineTest {
         assertTrue(Assistant.rulesTestPrompt(rs.take(1), rs).contains("Regras a testar: \"Oi\""))
         assertTrue(Assistant.diagnosisPrompt("REL", cfg.copy(aiKey = "SEGREDO"), listOf(rule), "").let { "REL" in it && "SEGREDO" !in it })
     }
+
+    @Test fun acompanhamento() {
+        val cfg = on.copy(followOn = true, followMin = 30, followLink = "https://chat.whatsapp.com/X", delayOn = false)
+        val rule = Rule(match = Match.ALL, replies = listOf("oi"))
+        val st = State()
+        run(msg("bom dia", sender = "João Silva"), listOf(rule), cfg, state = st, now = 1_000_000L)
+        assertEquals(1_000_000L + 30 * 60_000L, st.chats["João Silva"]!!.followAt)
+        assertTrue(Engine.followDue(st, 1_000_000L + 29 * 60_000L).isEmpty())
+        assertEquals(listOf("João Silva"), Engine.followDue(st, 1_000_000L + 30 * 60_000L))
+        // A new message restarts the count from it.
+        run(msg("e aí?", sender = "João Silva"), listOf(rule), cfg, state = st, now = 2_000_000L)
+        assertEquals(2_000_000L + 30 * 60_000L, st.chats["João Silva"]!!.followAt)
+        // You writing in the chat cancels it; our own reply echoed as yours does not.
+        run(Incoming("João Silva", "Eu", "oi", false, fromMe = true), listOf(rule), cfg, state = st, now = 2_100_000L)
+        assertEquals(2_000_000L + 30 * 60_000L, st.chats["João Silva"]!!.followAt)
+        run(Incoming("João Silva", "Eu", "pode deixar que eu vejo", false, fromMe = true), listOf(rule), cfg, state = st, now = 2_200_000L)
+        assertEquals(0L, st.chats["João Silva"]!!.followAt)
+        // "Já estou no grupo" stops it for good.
+        val st2 = State()
+        run(msg("Já estou no grupo, obrigado", sender = "Ana"), listOf(rule), cfg, state = st2)
+        assertTrue(st2.chats["Ana"]!!.followDone && st2.chats["Ana"]!!.followAt == 0L)
+        // Groups and the switch off never schedule.
+        val st3 = State()
+        run(msg("oi", sender = "Bia", group = "Turma"), listOf(rule.copy(groups = Groups.ALL)), cfg, state = st3)
+        run(msg("oi", sender = "Caio"), listOf(rule), cfg.copy(followOn = false), state = st3)
+        assertTrue(Engine.followDue(st3, Long.MAX_VALUE).isEmpty())
+        assertEquals("Bom dia, João! Entre: https://chat.whatsapp.com/X",
+            Engine.followText(cfg.copy(followText = "{saudacao}, {primeiro_nome}! Entre: {link}"), msg("x", sender = "João Silva"), monday10, 1)
+                .replaceFirstChar { it.uppercase() })
+    }
 }

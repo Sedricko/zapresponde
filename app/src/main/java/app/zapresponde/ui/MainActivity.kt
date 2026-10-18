@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Close
@@ -165,7 +166,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Modo aprovação", "frete" to "Fretes FreteBras", "follow" to "Acompanhamento", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -203,6 +204,7 @@ fun App() {
                     "backup" -> BackupScreen()
                     "approval" -> ApprovalScreen()
                     "frete" -> FreteScreen()
+                    "follow" -> FollowScreen()
                     "test" -> TestScreen()
                     "ai" -> AssistantScreen()
                     "help" -> HelpScreen()
@@ -644,6 +646,8 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Notifications, "Alerta de carga pedida", "Avisa no celular quando a carga está disponível", c.alertOn, { on -> cfg { copy(alertOn = on) } }) { open("frete") }
         Divider()
+        FeatureRow(Icons.Default.Share, "Acompanhamento", "Manda o link do grupo ${c.followMin} min depois da conversa", c.followOn, { on -> cfg { copy(followOn = on) } }) { open("follow") }
+        Divider()
         FeatureRow(Icons.Default.CheckCircle, "Modo aprovação", "Você confirma antes de enviar", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
         Divider()
         FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
@@ -911,6 +915,24 @@ fun ApprovalScreen() {
         Field("Conversas que precisam de aprovação", c.approvalList, lines = 3, help = "Um nome por linha. Vazio = todas as conversas.") { cfg { copy(approvalList = it) } }
     }
     Panel { Hint("O robô prepara a resposta e mostra uma notificação com \"Enviar\" e \"Descartar\". Nada é enviado sem o seu toque.") }
+}
+
+@Composable
+fun FollowScreen() {
+    val c = Store.config
+    Panel {
+        SwitchRow("Ativar acompanhamento", c.followOn) { cfg { copy(followOn = it) } }
+        NumberField("Esperar depois da última mensagem", c.followMin, "min") { cfg { copy(followMin = it.coerceIn(1, 1440)) } }
+        Field("Link do grupo", c.followLink, help = "Dados do grupo > Convidar via link > Copiar link. Entra no lugar de {link}.") { cfg { copy(followLink = it.trim()) } }
+        Field("Mensagem", c.followText, lines = 5, help = "{link} = link do grupo. Também valem {primeiro_nome}, {nome} e {saudacao}.") { cfg { copy(followText = it) } }
+        Advanced {
+            Field("Frases de quem já está no grupo", c.followJoined, lines = 3, help = "Separadas por vírgula. Se o contato escrever uma delas, não recebe o link.") { cfg { copy(followJoined = it) } }
+        }
+    }
+    Panel {
+        Hint("Depois de uma conversa que o app respondeu, ele espera esse tempo contado da última mensagem e manda a mensagem uma vez só por contato. Nova mensagem do contato recomeça a contagem; se você escrever na conversa ou ela estiver pausada, cancela. Segue o filtro de Contatos do app; grupos nunca recebem.")
+        Hint("Limite do Android: o envio usa o botão Responder da última notificação da conversa. Funciona bem com minutos ou poucas horas; se o celular reiniciar ou o app for fechado, os acompanhamentos pendentes não são enviados (aparece no Diagnóstico). Máximo: 1440 min (24 h).")
+    }
 }
 
 @Composable
@@ -1215,10 +1237,13 @@ private fun diagnose(ctx: android.content.Context): String {
     warn(c.approvalOn, "Modo aprovação ligado: nada sai sem você tocar em Enviar")
     val paused = synchronized(Store) { Store.state.chats.filter { it.value.pauseUntil > now }.toMap() }
     warn(paused.isNotEmpty(), "Conversas pausadas: " + paused.entries.joinToString { "${it.key} (até ${fmt(it.value.pauseUntil)})" })
+    val follows = synchronized(Store) { Store.state.chats.filter { it.value.followAt > 0 }.toMap() }
+    if (follows.isNotEmpty()) l += "ℹ️ Acompanhamentos marcados: " + follows.entries.joinToString { "${it.key} (às ${fmt(it.value.followAt)})" }
+    warn(c.followOn && c.followLink.isBlank(), "Acompanhamento ligado sem link do grupo: nada será enviado")
     l += "ℹ️ Regras ativas: ${Store.allRules().count { it.enabled }} (app ${Store.rules.count { it.enabled }}, planilha ${Store.sheet.rules.count { it.enabled }})"
     fun on(b: Boolean) = if (b) "ligado" else "desligado"
     l += "ℹ️ Recursos: boas-vindas ${on(c.welcomeOn)}, pedido ${on(c.formOn)}, fretes ${on(c.freteOn)}, leads ${on(c.leadsOn)}, " +
-        "alerta ${on(c.alertOn)}, pausa ao assumir ${on(c.takeoverOn)} (${c.takeoverMin} min, ao ler: ${on(c.takeoverOnRead)}), atraso ${on(c.delayOn)}"
+        "alerta ${on(c.alertOn)}, pausa ao assumir ${on(c.takeoverOn)} (${c.takeoverMin} min, ao ler: ${on(c.takeoverOnRead)}), atraso ${on(c.delayOn)}, frete escrito ${on(c.freteLivreOn)}, acompanhamento ${on(c.followOn)} (${c.followMin} min), diagnóstico pela IA ${on(c.aiDiagOn)}"
     if (Store.sheet.error.isNotEmpty()) l += "❌ Último erro de sincronização em segundo plano: ${Store.sheet.error}"
 
     l += ""; l += "— Planilha"

@@ -102,6 +102,13 @@ data class Config(
     /** Chave da API do Gemini; fica fora do backup. */
     val aiKey: String = "",
     val aiModel: String = "gemini-flash-latest",
+    /** Acompanhamento: depois de uma conversa respondida pelo app, manda uma vez o link do grupo. */
+    val followOn: Boolean = false,
+    val followMin: Int = 30,
+    val followText: String = "{saudacao}, {primeiro_nome}! Para acompanhar as novas cargas, entre no nosso grupo:\n🔗 {link}\n\nSe você já está no grupo, desconsidere 👍",
+    val followLink: String = "",
+    /** Frases que mostram que o contato já está no grupo; separadas por vírgula. */
+    val followJoined: String = "já estou no grupo, já to no grupo, já sou do grupo, já participo, já faço parte, já estou nele, já entrei",
     /** Diagnóstico pela IA: manda o relatório (com textos das mensagens) ao Gemini para explicar as decisões. */
     val aiDiagOn: Boolean = false,
 )
@@ -118,6 +125,9 @@ class ChatState(
     val formAnswers: MutableList<String> = mutableListOf(),
     // ruleId -> [count, lastMillis]
     val rules: MutableMap<String, LongArray> = mutableMapOf(),
+    /** Acompanhamento: when to send it (0 = nothing pending) and whether this contact already got it or is in the group. */
+    var followAt: Long = 0,
+    var followDone: Boolean = false,
 )
 
 @Serializable

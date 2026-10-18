@@ -37,14 +37,28 @@ object Engine {
         if (!cfg.enabled) return skip("Respostas automáticas desligadas")
         t += "✅ Respostas automáticas ligadas"
         // Answering this would send the bot's reply to the contact because *you* wrote; ReplyService treats it as takeover.
-        if (msg.fromMe) return skip("Mensagem enviada por você na conversa")
+        if (msg.fromMe) {
+            // You wrote in the chat: you took over, so a pending Acompanhamento is cancelled (our own reply echoed back is not you).
+            state.chats[msg.chat]?.takeIf { msg.text !in it.lastTexts && it.followAt > 0 }?.followAt = 0
+            return skip("Mensagem enviada por você na conversa")
+        }
         t += "✅ Mensagem de outra pessoa (${if (msg.isGroup) "grupo ${msg.chat}" else msg.sender})"
         if (cfg.contactsOn) audience(msg, cfg, phoneNames)?.let { return skip(it) }
         t += if (cfg.contactsOn) "✅ Contato permitido pelo filtro de contatos" else "ℹ️ Filtro de contatos desligado"
         if (cfg.scheduleOn && !inWindow(cfg.scheduleHours, cfg.scheduleDays, now)) return skip("Fora da agenda")
         t += if (cfg.scheduleOn) "✅ Dentro da agenda (${cfg.scheduleHours})" else "ℹ️ Agenda desligada"
         val cs = state.chats.getOrPut(msg.chat) { ChatState() }
-        if (cs.pauseUntil > nowMs) return skip("Conversa pausada")
+        if (cfg.followOn && !msg.isGroup && !cs.followDone) {
+            val t0 = normalize(msg.text)
+            if (splitList(cfg.followJoined).any { hasWord(t0, normalize(it)) }) {
+                cs.followDone = true; cs.followAt = 0
+                t += "✅ Acompanhamento: o contato disse que já está no grupo; não vai receber o link"
+            } else if (cs.followAt > 0) {
+                cs.followAt = nowMs + cfg.followMin * 60_000L
+                t += "ℹ️ Acompanhamento: nova mensagem, a contagem de ${cfg.followMin} min recomeçou"
+            }
+        }
+        if (cs.pauseUntil > nowMs) { cs.followAt = 0; return skip("Conversa pausada") }
         // A message equal to something we just sent is our own reply echoed back, in this chat or another WhatsApp on the phone.
         if (state.chats.values.any { c -> c.lastTexts.any { it.trim() == msg.text.trim() } }) return skip("Mensagem é uma resposta nossa")
         t += "✅ Conversa não pausada e mensagem não é eco de resposta nossa"
@@ -161,6 +175,13 @@ object Engine {
         return finish(msg, now, cfg, cs, nowMs, out, ruleName, formRow, random)
     }
 
+    /** Chats whose Acompanhamento is due. */
+    fun followDue(state: State, nowMs: Long): List<String> = state.chats.filter { it.value.followAt in 1..nowMs }.keys.toList()
+
+    /** Acompanhamento text: {link} is the group link, plus the usual variables. */
+    fun followText(cfg: Config, msg: Incoming, now: LocalDateTime, count: Int) =
+        fill(cfg.followText.replace("{link}", cfg.followLink.trim()), msg, now, count)
+
     /** Reason to stay silent under the "Contatos" setting, or null to go on. [phoneNames] are normalized. */
     fun audience(msg: Incoming, cfg: Config, phoneNames: Set<String>): String? {
         if (msg.isGroup) return if (cfg.groupsOn) null else "Grupos desativados"
@@ -191,6 +212,8 @@ object Engine {
             }
         }
         cs.lastBotReply = nowMs
+        // Counted from the last message of the conversation: this reply; a new message from the contact restarts it.
+        if (cfg.followOn && !msg.isGroup && !cs.followDone) cs.followAt = nowMs + cfg.followMin * 60_000L
         cs.recentReplies.add(nowMs)
         cs.lastTexts.addAll(replies)
         while (cs.lastTexts.size > 10) cs.lastTexts.removeAt(0)

@@ -30,6 +30,9 @@ class ReplyService : NotificationListenerService() {
                            val decision: Decision, val before: ChatState?)
     private val approvals = HashMap<Int, Approval>()
     private var nextId = 1
+    /** Latest Reply button of each chat: the only way to send the Acompanhamento later. Lost if the app is restarted. */
+    private val lastReply = HashMap<String, Triple<Incoming, Notification.Action, String>>()
+    private var followJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -46,6 +49,39 @@ class ReplyService : NotificationListenerService() {
     override fun onListenerConnected() {
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
+        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck() } }
+    }
+
+    /** Sends each Acompanhamento whose time has come, through the last Reply button seen in that chat. */
+    private fun followCheck() {
+        val cfg = Store.config
+        val now = System.currentTimeMillis()
+        val due = synchronized(Store) { Engine.followDue(Store.state, now).also { l -> l.forEach { Store.state.chats[it]!!.followAt = 0 } } }
+        if (due.isEmpty()) return
+        Store.saveState()
+        for (chat in due) {
+            val r = lastReply[chat]
+            if (r == null) { Store.log(chat, "", "Acompanhamento não enviado: o app foi reiniciado e perdeu o botão Responder desta conversa"); continue }
+            val (msg, action, pkg) = r
+            if (!cfg.followOn || cfg.followLink.isBlank()) { Store.log(chat, "", "Acompanhamento não enviado: função desligada ou sem link do grupo"); continue }
+            val text = synchronized(Store) {
+                val cs = Store.state.chats.getOrPut(chat) { ChatState() }
+                cs.followDone = true
+                cs.lastTexts.add(Engine.followText(cfg, msg, LocalDateTime.now(), cs.replyCount))
+                while (cs.lastTexts.size > 10) cs.lastTexts.removeAt(0)
+                Store.saveState()
+                cs.lastTexts.last()
+            }
+            if (!send(action, text)) {
+                synchronized(Store) { Store.state.chats[chat]?.followDone = false; Store.saveState() }
+                Store.log(chat, "", "Acompanhamento não enviado: o WhatsApp recusou o botão Responder (notificação antiga)")
+                continue
+            }
+            Store.log(chat, "", "📨 Acompanhamento enviado (link do grupo)")
+            val entry = HistoryEntry(now, APPS[pkg] ?: pkg, chat, false, "", text, "Acompanhamento")
+            Store.addHistory(entry)
+            if (cfg.sheetOn && cfg.sheetLogOn) { Store.queue(historico = Sheets.historyRow(entry)); Sheets.syncNow(this) }
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -74,6 +110,7 @@ class ReplyService : NotificationListenerService() {
             return
         }
 
+        if (!msg.isGroup) lastReply[msg.chat] = Triple(msg, action, sbn.packageName)
         // WhatsApp re-posts the same notification with the whole history; handle each message once.
         val key = "${msg.chat}|${msg.text}|${lastMessageTime(n)}"
         if (key in seen) return
