@@ -112,6 +112,8 @@ data class Config(
     val waitOn: Boolean = false,
     val waitMode: WaitMode = WaitMode.ASK,
     val waitHours: Int = 24,
+    /** With requests waiting, the service reads the freight sheet this often (the background sync can't go below 15 min). */
+    val waitReadMin: Int = 5,
     /** Acompanhamento: depois de uma conversa respondida pelo app, manda uma vez o link do grupo. */
     val followOn: Boolean = false,
     val followMin: Int = 30,

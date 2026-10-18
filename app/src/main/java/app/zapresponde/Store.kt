@@ -13,6 +13,8 @@ import java.io.File
 data class HistoryEntry(
     val time: Long, val app: String, val chat: String, val isGroup: Boolean,
     val text: String, val reply: String, val rule: String,
+    /** Path of the decision, shown when you tap the reply in Histórico. */
+    val trace: List<String> = emptyList(),
 )
 
 /** One WhatsApp message the service saw, and what it decided: the "Registro" of the diagnostic. */

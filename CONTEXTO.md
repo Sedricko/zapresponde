@@ -1,6 +1,6 @@
 # ZapResponde: contexto para continuar o trabalho
 
-Atualizado em 18/10/2026, app 0.9.14 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
+Atualizado em 18/10/2026, app 0.9.15 e script 0.9.3. Cole este arquivo, ou peça para ler `CONTEXTO.md` do repositório, ao começar uma conversa nova.
 
 ## O que é
 App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao WhatsApp Business automaticamente, lendo as notificações. Ele se integra ao Google Sheets por um Apps Script colado na planilha. Dono: William (Transportes Poloni, cargas e fretes). A comunicação é sempre em português.
@@ -83,6 +83,12 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
   - **Avisar quando a carga aparecer** (`waitOn`, `waitMode` ASK/AUTO/NOTIFY, `waitHours` 24): pedido sem carga ativa vira `State.waiting`; `ReplyService.waitCheck` (a cada 1 min, com a planilha em cache) usa `Engine.waitingFound`: ASK = notificação de aprovação (Enviar/Descartar, mecanismo `approvals`), AUTO = envia e avisa (vira ASK se a conversa está pausada), NOTIFY = só avisa. Sem botão Responder guardado: só avisa.
   - **Alertas vibram**: canal novo `alertas_vibra` (o antigo `alertas` é apagado; canal não muda vibração depois de criado).
   - **Ajustes reorganizado**: Fretes (Respostas de frete, Pedido escrito de qualquer jeito, Oferecer outra carga, Avisar quando a carga aparecer, Link do grupo depois da conversa, Leads e alerta), Respostas, Quem e quando (Contatos = filtro do app todo, Agenda), Segurança (Aprovar antes de enviar, Pausa, Atraso, Loop), Ferramentas (Testar, Diagnóstico com a IA dentro, Assistente de IA, Backup). Funções de frete mostram "precisa de Respostas de frete ligado" quando o principal está desligado.
+- 0.9.15:
+  - **Início** focada em fretes: faixa "Precisa da sua atenção" (aprovações pendentes, planilha com erro ou parada há 2 h, funções de frete sem o principal ligado), contadores de hoje (cargas enviadas, indisponíveis, outra carga, links do grupo, esperando carga, respostas), rotas mais pedidas hoje (recalculadas do texto do Histórico).
+  - **Histórico**: selo colorido por tipo (`kindOf`), filtros, busca, tocar mostra a resposta inteira e o caminho da decisão (`HistoryEntry.trace`).
+  - Com pedidos esperando carga, o serviço lê a planilha a cada `waitReadMin` (5) min.
+  - Backup: textos claros; o "Salvar backup" abre o seletor do Android (Google Drive, pCloud com app instalado, pasta); botão "Salvar backup na planilha agora". Drive/pCloud por API não: exigiria cadastro OAuth no Google Cloud/pCloud; o seletor já cobre.
+  - Ícone próprio por função; frase "o que faz" no topo das telas de frete.
 - Estado de uma resposta só é devolvido se o envio falhar ou se você descartar a aprovação, nunca no cancelamento por mensagem nova (isso apagava a pausa de quando você assume). "Respondido" só vai para o registro depois do envio.
 - Testado no celular: respostas, boas-vindas, regras, gravação do Historico na planilha e Fretes (a primeira mensagem FreteBras foi respondida). A planilha de cargas está ligada, com 164 linhas.
 - Último problema: dois anúncios só com link ficaram sem resposta. A causa provável é o WhatsApp Web aberto (sem notificação no celular) ou a conversa pausada. Pedi para ele rodar o Diagnóstico e mandar o relatório.

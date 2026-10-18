@@ -29,6 +29,7 @@ class ReplyService : NotificationListenerService() {
     private class Approval(val msg: Incoming, val action: Notification.Action, val pkg: String,
                            val decision: Decision, val before: ChatState?)
     private val approvals = HashMap<Int, Approval>()
+    fun approvalsPending() = approvals.size
     private var nextId = 1
     /** Latest Reply button of each chat: the only way to send the Acompanhamento later. Lost if the app is restarted. */
     private class Last(val msg: Incoming, val action: Notification.Action, val pkg: String, val open: android.app.PendingIntent?)
@@ -54,10 +55,17 @@ class ReplyService : NotificationListenerService() {
     }
 
     /** "Avisar quando a carga aparecer": a load someone asked for is now in the sheet. Ask, send by itself, or only tell you. */
-    private fun waitCheck() {
+    private var lastWaitRead = 0L
+
+    private suspend fun waitCheck() {
         val cfg = Store.config
         if (!cfg.waitOn || !cfg.freteOn) return
         val now = System.currentTimeMillis()
+        // Only while someone waits: a fresh read so a new load is seen in minutes, not at the next 15-min sync.
+        if (cfg.sheetOn && cfg.sheetUrl.isNotBlank() && Store.state.waiting.isNotEmpty() && now - lastWaitRead >= cfg.waitReadMin * 60_000L) {
+            lastWaitRead = now
+            withContext(Dispatchers.IO) { runCatching { Sheets.refresh(cfg, fast = true) } }
+        }
         val found = synchronized(Store) {
             Engine.waitingFound(Store.state, Store.sheet.consulta, LocalDateTime.now(), now, cfg.waitHours).also { Store.saveState() }
         }
@@ -242,7 +250,7 @@ class ReplyService : NotificationListenerService() {
             Store.log(msg.chat, msg.text, "Respondido (${d.rule})", d.trace)
             val entry = HistoryEntry(
                 System.currentTimeMillis(), APPS[pkg] ?: pkg, msg.chat, msg.isGroup,
-                msg.text, d.replies.joinToString("\n---\n"), d.rule,
+                msg.text, d.replies.joinToString("\n---\n"), d.rule, d.trace,
             )
             Store.addHistory(entry)
             val date = Sheets.historyRow(entry)[0]
