@@ -127,6 +127,7 @@ import app.zapresponde.ReplyService
 import app.zapresponde.Rule
 import app.zapresponde.Sheets
 import app.zapresponde.Store
+import app.zapresponde.WaitMode
 import app.zapresponde.Who
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
