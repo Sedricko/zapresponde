@@ -2,11 +2,14 @@ package app.zapresponde
 
 import android.app.Notification
 import android.app.RemoteInput
+import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import java.time.LocalDateTime
 
 class ReplyService : NotificationListenerService() {
@@ -22,7 +26,8 @@ class ReplyService : NotificationListenerService() {
     private val pending = HashMap<String, Job>()
     private val seen = ArrayDeque<String>()
 
-    private class Approval(val msg: Incoming, val action: Notification.Action, val pkg: String, val decision: Decision)
+    private class Approval(val msg: Incoming, val action: Notification.Action, val pkg: String,
+                           val decision: Decision, val before: ChatState?)
     private val approvals = HashMap<Int, Approval>()
     private var nextId = 1
 
@@ -38,12 +43,31 @@ class ReplyService : NotificationListenerService() {
         super.onDestroy()
     }
 
+    override fun onListenerConnected() {
+        Health.mark(this, "connectedAt")
+        Store.log("(sistema)", "", "Serviço de notificações conectado")
+    }
+
+    override fun onListenerDisconnected() {
+        Health.mark(this, "disconnectedAt")
+        Store.log("(sistema)", "", "Android desconectou o serviço; pedindo reconexão")
+        if (Build.VERSION.SDK_INT >= 24) requestRebind(ComponentName(this, ReplyService::class.java))
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName !in APPS) return
+        Health.mark(this, "notifAt")
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         val action = replyAction(n)
-        val msg = parse(sbn) ?: return
+        val msg = parse(sbn) ?: run {
+            if (n.category == Notification.CATEGORY_MESSAGE) {
+                Health.count(this, "unreadable")
+                Store.log("(não lida)", "", "Notificação de mensagem sem título ou texto: não deu para ler")
+            }
+            return
+        }
+        if (action != null) Health.mark(this, "replyNotifAt")
         if (action == null) {
             // A real message without Reply is worth seeing in the diagnostic; WhatsApp's own notices are noise.
             if (n.category == Notification.CATEGORY_MESSAGE) Store.log(msg.chat, msg.text, "Sem botão Responder na notificação")
@@ -66,7 +90,11 @@ class ReplyService : NotificationListenerService() {
         // The freight sheet changes all the time; read it fresh so a new load is not answered as "indisponível".
         if (cfg.freteOn && cfg.sheetOn && cfg.sheetUrl.isNotBlank() && Engine.freteRoute(msg.text) != null) {
             scope.launch {
-                withContext(Dispatchers.IO) { runCatching { Sheets.refresh(cfg) } }
+                withContext(Dispatchers.IO) {
+                    runCatching { Sheets.refresh(cfg, fast = true) }.onFailure {
+                        Store.log(msg.chat, msg.text, "Planilha não atualizou na hora (${it.message}); usando a última cópia")
+                    }
+                }
                 answer(msg, action, sbn)
             }
             return
@@ -76,6 +104,7 @@ class ReplyService : NotificationListenerService() {
 
     private fun answer(msg: Incoming, action: Notification.Action, sbn: StatusBarNotification) {
         val cfg = Store.config
+        val before = synchronized(Store) { Store.state.chats[msg.chat]?.let(::copyOf) }
         val d = synchronized(Store) {
             Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), cfg, Store.allRules(),
@@ -90,33 +119,54 @@ class ReplyService : NotificationListenerService() {
         val list = cfg.approvalList.lines().map { Engine.normalize(it) }.filter { it.isNotEmpty() }
         if (cfg.approvalOn && (list.isEmpty() || Engine.normalize(msg.chat) in list)) {
             val id = nextId++
-            approvals[id] = Approval(msg, action, sbn.packageName, d)
+            approvals[id] = Approval(msg, action, sbn.packageName, d, before)
             Store.log(msg.chat, msg.text, "Aguardando sua aprovação (${d.rule})")
             Alerts.approval(this, id, msg.chat, d.replies.joinToString("\n---\n"), open)
             return
         }
-        Store.log(msg.chat, msg.text, "Respondido (${d.rule})")
-        deliver(msg, action, sbn.packageName, d)
+        deliver(msg, action, sbn.packageName, d, before)
     }
 
     /** "Enviar" or "Descartar" tapped on an approval notification. */
     fun approve(id: Int, send: Boolean) {
         val a = approvals.remove(id) ?: return
         Alerts.cancel(this, id)
-        if (send) deliver(a.msg, a.action, a.pkg, a.decision.copy(delayMs = 0))
+        if (send) deliver(a.msg, a.action, a.pkg, a.decision.copy(delayMs = 0), a.before)
+        else { rollback(a.msg.chat, a.before); Store.log(a.msg.chat, a.msg.text, "Resposta descartada por você") }
     }
 
-    private fun deliver(msg: Incoming, action: Notification.Action, pkg: String, d: Decision) {
+    private fun copyOf(cs: ChatState): ChatState = Store.json.decodeFromString(Store.json.encodeToString(cs))
+
+    /** A reply that was not sent gives back what its decision consumed ("uma vez", counters), keeping a newer pause. */
+    private fun rollback(chat: String, before: ChatState?) = synchronized(Store) {
+        val pause = Store.state.chats[chat]?.pauseUntil ?: 0
+        Store.state.chats[chat] = before?.let(::copyOf) ?: ChatState()
+        Store.state.chats[chat]!!.pauseUntil = maxOf(pause, before?.pauseUntil ?: 0)
+        Store.saveState()
+    }
+
+    private fun deliver(msg: Incoming, action: Notification.Action, pkg: String, d: Decision, before: ChatState?) {
         val cfg = Store.config
         // A newer message from the same chat replaces a reply that is still waiting.
         pending.remove(msg.chat)?.cancel()
         pending[msg.chat] = scope.launch {
-            delay(d.delayMs)
-            d.replies.forEachIndexed { i, text ->
-                if (i > 0) delay(1500)
-                if (!send(action, text)) { Store.log(msg.chat, msg.text, "Falhou ao enviar pelo WhatsApp"); return@launch }
+            try {
+                delay(d.delayMs)
+                d.replies.forEachIndexed { i, text ->
+                    if (i > 0) delay(1500)
+                    if (!send(action, text)) {
+                        rollback(msg.chat, before)
+                        Store.log(msg.chat, msg.text, "Falhou ao enviar pelo WhatsApp (estado devolvido)")
+                        return@launch
+                    }
+                }
+            } catch (e: CancellationException) {
+                // No rollback here: the newer message (or your pause) already changed this chat's state.
+                Store.log(msg.chat, msg.text, "Resposta cancelada antes de enviar")
+                throw e
             }
             pending.remove(msg.chat)
+            Store.log(msg.chat, msg.text, "Respondido (${d.rule})")
             val entry = HistoryEntry(
                 System.currentTimeMillis(), APPS[pkg] ?: pkg, msg.chat, msg.isGroup,
                 msg.text, d.replies.joinToString("\n---\n"), d.rule,

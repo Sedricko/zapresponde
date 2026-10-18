@@ -114,6 +114,7 @@ import app.zapresponde.Audience
 import app.zapresponde.Config
 import app.zapresponde.Contacts
 import app.zapresponde.Engine
+import app.zapresponde.Health
 import app.zapresponde.Freq
 import app.zapresponde.Groups
 import app.zapresponde.Incoming
@@ -267,6 +268,8 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
     val c = Store.config
     val ctx = LocalContext.current
     val access = resumeTick >= 0 && NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+    val connected = resumeTick >= 0 && Health.connected(ctx)
+    val degraded = c.enabled && access && !connected
     val bg by animateColorAsState(if (c.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh, label = "bg")
     val fg = if (c.enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
 
@@ -276,9 +279,13 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
     ) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(if (c.enabled) "Respondendo" else "Pausado", style = MaterialTheme.typography.headlineSmall, color = fg, fontWeight = FontWeight.Bold)
+                Text(if (degraded) "Ligado, sem conexão" else if (c.enabled) "Respondendo" else "Pausado", style = MaterialTheme.typography.headlineSmall, color = fg, fontWeight = FontWeight.Bold)
                 Text(
-                    if (c.enabled) "As mensagens do WhatsApp estão sendo respondidas" else "Toque no botão para começar a responder",
+                    when {
+                        degraded -> "O serviço de notificações está desconectado. Abra Ajustes > Diagnóstico."
+                        c.enabled -> "As mensagens do WhatsApp estão sendo respondidas"
+                        else -> "Toque no botão para começar a responder"
+                    },
                     style = MaterialTheme.typography.bodyMedium, color = fg.copy(alpha = 0.85f),
                 )
             }
@@ -296,7 +303,13 @@ fun Home(open: (String) -> Unit, goTab: (String) -> Unit, newRule: () -> Unit) {
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
-            Text("Libere o acesso às notificações para o app conseguir responder.", Modifier.weight(1f).padding(horizontal = 12.dp))
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text("Libere o acesso às notificações para o app conseguir responder.")
+                Text(
+                    "Se o botão \"Liberar\" ficar cinza: Configurações do Android > Apps > ZapResponde > ⋮ > Permitir configurações restritas.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             TextButton({ ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }) { Text("Liberar") }
         }
     }
@@ -560,7 +573,9 @@ fun SheetScreen() {
             testMsg, Modifier.padding(vertical = 8.dp),
             color = if (testMsg.startsWith("Não") || testMsg.startsWith("Esse")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         )
-        NumberField("Sincronizar a cada", c.sheetSyncMin, "min") { cfg { copy(sheetSyncMin = it) } }
+        NumberField("Sincronizar a cada (mín. 15)", c.sheetSyncMin, "min") {
+            cfg { copy(sheetSyncMin = it.coerceAtLeast(15)) }; Sheets.schedule(ctx)
+        }
         Advanced("Digitar link e chave") {
             Field("Link do Apps Script", c.sheetUrl, help = "Termina em /exec") { cfg { copy(sheetUrl = it.trim()) } }
             Field("Chave", c.sheetKey) { cfg { copy(sheetKey = it.trim()) } }
@@ -640,7 +655,7 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.DateRange, "Agenda", "Só responde em ${c.scheduleHours}", c.scheduleOn, { on -> cfg { copy(scheduleOn = on) } }) { open("schedule") }
         Divider()
-        FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você abrir a conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
+        FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você tocar na notificação ou escrever na conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
         Divider()
         FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
         Divider()
@@ -904,7 +919,7 @@ fun FreteScreen() {
         Field("Quando a carga não estiver na planilha", c.freteNotFound, lines = 5, help = "Deixe vazio para não responder.") { cfg { copy(freteNotFound = it) } }
     }
     Panel {
-        Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, usa a do mesmo tipo de carga.")
+        Hint("Quando chega \"estou disponível para carregar seu frete de Origem/UF para Destino/UF\" (ou o link do FreteBras), o app procura a rota na planilha ligada em ZapResponde > Ligar planilha de cargas. A coluna A tem a rota (\"Ponta Grossa/PR para Rio de Janeiro/RJ\") e a mensagem pronta da linha é enviada. Com mais de uma carga na rota, usa a do mesmo tipo de carga. A planilha precisa estar ligada em Planilha > Google Sheets; sem isso, o app usa a última cópia das cargas, que não atualiza.")
     }
 }
 
@@ -914,6 +929,7 @@ fun TestScreen() {
     var text by remember { mutableStateOf("Oi, bom dia") }
     var group by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
+    val ctx = LocalContext.current
     Panel("Mensagem simulada") {
         Field("Nome de quem manda", name) { name = it }
         Field("Grupo", group, help = "Vazio = conversa individual") { group = it }
@@ -922,7 +938,7 @@ fun TestScreen() {
             val msg = Incoming(group.ifBlank { name }, name, text, group.isNotBlank())
             val d = Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), Store.config.copy(enabled = true),
-                Store.allRules(), Store.sheet.consulta, Store.stateCopy(),
+                Store.allRules(), Store.sheet.consulta, Store.stateCopy(), phoneNames = Contacts.names(ctx),
             )
             result = if (d.replies.isEmpty()) "Sem resposta: ${d.reason}" to emptyList()
             else "${d.rule} · espera de ${d.delayMs / 1000}s" to d.replies
@@ -982,6 +998,10 @@ fun HelpScreen() {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
         }
         Divider()
+        FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp Business", "Se você usa o Business", null) {
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp.w4b")))
+        }
+        Divider()
         // Re-binding the listener fixes the common "stopped replying" case after updates.
         FeatureRow(Icons.Default.Refresh, "Reiniciar o serviço de respostas", "Resolve quando o app para de responder", null) {
             NotificationListenerService.requestRebind(ComponentName(ctx, ReplyService::class.java))
@@ -1008,8 +1028,11 @@ private fun diagnose(ctx: android.content.Context): String {
     l += "— Celular"
     ok(NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName), "Acesso às notificações liberado", "Acesso às notificações DESLIGADO: o app não vê nenhuma mensagem")
     ok(ReplyService.instance != null, "Serviço de respostas rodando", "Serviço de respostas parado: use \"Reiniciar o serviço de respostas\" ou reinicie o celular")
+    ok(Health.connected(ctx), "Serviço de notificações conectado",
+        "Serviço de notificações DESCONECTADO: use \"Reiniciar o serviço de respostas\" ou reinicie o celular")
     ok(ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName), "Sem economia de bateria", "Economia de bateria ativa: o Android pode parar o app")
     ok(NotificationManagerCompat.from(ctx).areNotificationsEnabled(), "Notificações do ZapResponde liberadas", "Notificações do ZapResponde bloqueadas: alertas e aprovação não aparecem")
+    l += Health.report(ctx)
     val last = Store.events.firstOrNull()
     if (last == null) l += "⚠️ Nenhuma mensagem do WhatsApp chegou ao app ainda"
     else warn(now - last.time > 6 * 3_600_000L, "Última mensagem vista há mais de 6 h (${fmt(last.time)}). Com o WhatsApp Web aberto, o celular não mostra notificações e o app não vê as mensagens.")
@@ -1020,9 +1043,13 @@ private fun diagnose(ctx: android.content.Context): String {
     warn(c.contactsOn && c.contactsMode != Audience.ALL, "Filtro de contatos ligado: ${AUDIENCE[c.contactsMode]}")
     warn(c.contactsOn && !c.groupsOn, "Respostas em grupos desligadas")
     warn(c.approvalOn, "Modo aprovação ligado: nada sai sem você tocar em Enviar")
-    val paused = Store.state.chats.filter { it.value.pauseUntil > now }
+    val paused = synchronized(Store) { Store.state.chats.filter { it.value.pauseUntil > now }.toMap() }
     warn(paused.isNotEmpty(), "Conversas pausadas: " + paused.entries.joinToString { "${it.key} (até ${fmt(it.value.pauseUntil)})" })
     l += "ℹ️ Regras ativas: ${Store.allRules().count { it.enabled }} (app ${Store.rules.count { it.enabled }}, planilha ${Store.sheet.rules.count { it.enabled }})"
+    fun on(b: Boolean) = if (b) "ligado" else "desligado"
+    l += "ℹ️ Recursos: boas-vindas ${on(c.welcomeOn)}, pedido ${on(c.formOn)}, fretes ${on(c.freteOn)}, leads ${on(c.leadsOn)}, " +
+        "alerta ${on(c.alertOn)}, pausa ao assumir ${on(c.takeoverOn)} (${c.takeoverMin} min, ao ler: ${on(c.takeoverOnRead)}), atraso ${on(c.delayOn)}"
+    if (Store.sheet.error.isNotEmpty()) l += "❌ Último erro de sincronização em segundo plano: ${Store.sheet.error}"
 
     l += ""; l += "— Planilha"
     if (!c.sheetOn || c.sheetUrl.isBlank()) l += "⚠️ Planilha não conectada"
@@ -1046,6 +1073,17 @@ private fun diagnose(ctx: android.content.Context): String {
     l += ""; l += "— Últimas mensagens recebidas"
     if (Store.events.isEmpty()) l += "(nenhuma)"
     Store.events.take(15).forEach { e -> l += "${fmt(e.time)} · ${e.chat}: \"${e.text.take(50).replace('\n', ' ')}\" → ${e.result}" }
+    val causa = when {
+        !NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName) ->
+            "O acesso às notificações está desligado. Se o botão estiver cinza: Android > Apps > ZapResponde > ⋮ > Permitir configurações restritas."
+        !Health.connected(ctx) -> "O Android desconectou o serviço de notificações (bateria ou início automático)."
+        !c.enabled -> "As respostas automáticas estão desligadas."
+        Health.get(ctx, "notifAt") == 0L -> "Nenhuma notificação do WhatsApp chegou ao app."
+        now - Health.get(ctx, "notifAt") > 6 * 3_600_000L ->
+            "Faz horas sem notificação do WhatsApp. Verifique WhatsApp Web aberto, conversas silenciadas ou notificações do WhatsApp desligadas."
+        else -> null
+    }
+    l.add(2, if (causa != null) "➡️ CAUSA MAIS PROVÁVEL: $causa" else "➡️ O ambiente parece saudável; veja o motivo de cada mensagem no fim.")
     return l.joinToString("\n")
 }
 

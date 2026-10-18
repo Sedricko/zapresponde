@@ -16,8 +16,8 @@ object Health {
     fun get(c: Context, key: String) = p(c).getLong(key, 0L)
     fun count(c: Context, key: String) = p(c).edit().putInt(key, p(c).getInt(key, 0) + 1).apply()
 
-    /** O listener está conectado agora (não apenas criado). */
-    fun connected(c: Context) = get(c, "connectedAt") > get(c, "disconnectedAt")
+    /** O listener está conectado agora. Sem registro nenhum (logo após atualizar) conta como conectado, para não dar alarme falso. */
+    fun connected(c: Context) = get(c, "connectedAt") >= get(c, "disconnectedAt")
 
     /** Linhas de ambiente e de rastro para o relatório do Diagnóstico. */
     fun report(c: Context): List<String> {
