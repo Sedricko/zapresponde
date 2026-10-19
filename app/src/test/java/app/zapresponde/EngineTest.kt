@@ -428,4 +428,18 @@ class EngineTest {
         run(msg("Mairinque para Magé", sender = "Ana"), listOf(rule), cfg, state = st2, now = 1_000_000L, consulta = sheet)
         assertEquals("Mensagem repetida em menos de 2 min: já tratada", run(msg("Mairinque para Magé", sender = "Ana"), listOf(rule), cfg, state = st2, now = 1_030_000L, consulta = sheet).reason)
     }
+
+    @Test fun voceAssumiuLendo() {
+        val sheet = listOf(listOf("x", ""), listOf("Serra/ES para Jaboatão dos Guararapes/PE", "carga serra"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true)
+        val rule = Rule(match = Match.ALL, enabled = false)
+        val st = State(); val m = 60_000L
+        // José, 19/10: the ad is answered at 07:04; "Meu veículo para 16 paletes" is not.
+        run(msg("estou disponível para carregar seu frete de Serra/ES para Jaboatão dos Guararapes/PE", sender = "José"), listOf(rule), cfg, state = st, now = 4 * 60 * m, consulta = sheet)
+        assertFalse(Engine.readMeansTakeover(st.chats["José"], 4 * 60 * m + 5 * m))
+        run(msg("Meu veículo para 16 paletes", sender = "José"), listOf(rule), cfg, state = st, now = 4 * 60 * m + m, consulta = sheet)
+        // You read it on WhatsApp Web at 07:07: that is taking over.
+        assertTrue(Engine.readMeansTakeover(st.chats["José"], 4 * 60 * m + 3 * m))
+        assertFalse(Engine.readMeansTakeover(null, 0))
+    }
 }

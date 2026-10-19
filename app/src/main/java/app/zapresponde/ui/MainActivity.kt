@@ -790,7 +790,7 @@ fun MoreTab(open: (String) -> Unit) {
     Panel("Segurança") {
         FeatureRow(Icons.Default.CheckCircle, "Aprovar antes de enviar", "Você confirma cada resposta pela notificação", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
         Divider()
-        FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min se você tocar na notificação ou escrever na conversa", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
+        FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min quando você escreve, toca na notificação ou lê o que o app não respondeu", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
         Divider()
         FeatureRow(Icons.Default.Refresh, "Atraso humano", "Espera de ${c.delayMinSec} a ${c.delayMaxSec} segundos antes de responder", c.delayOn, { on -> cfg { copy(delayOn = on) } }) { open("delay") }
         Divider()
@@ -927,7 +927,9 @@ fun TakeoverScreen() {
     val c = Store.config
     Panel {
         SwitchRow("Ativar pausa", c.takeoverOn) { cfg { copy(takeoverOn = it) } }
-        SwitchRow("Pausar também quando a conversa for lida", c.takeoverOnRead, "Inclui ler pelo WhatsApp Web. Deixe desligado se você usa o Web.") { cfg { copy(takeoverOnRead = it) } }
+        SwitchRow("Pausar quando você ler uma mensagem que o app não respondeu", c.takeoverOnUnanswered,
+            "Funciona também no WhatsApp Web: se você abriu a conversa para responder o que o robô não respondeu, ele sai") { cfg { copy(takeoverOnUnanswered = it) } }
+        SwitchRow("Pausar sempre que a conversa for lida", c.takeoverOnRead, "Até só para olhar. Mais forte: deixe desligado se você abre muitas conversas no Web.") { cfg { copy(takeoverOnRead = it) } }
     }
     Panel("Duração") {
         NumberField("Tempo de pausa", c.takeoverMin, "min") { cfg { copy(takeoverMin = it) } }

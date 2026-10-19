@@ -200,6 +200,13 @@ object Engine {
         return cfg.freteRepeatText.ifBlank { null }
     }
 
+    /**
+     * The chat's notification was cleared by reading it (phone or WhatsApp Web). If the last message there was one the
+     * app did not answer, a person is handling it: José's "Meu veículo para 16 paletes", read and answered by you on the Web.
+     */
+    fun readMeansTakeover(cs: ChatState?, nowMs: Long): Boolean =
+        cs != null && cs.lastInAt > cs.lastBotReply && nowMs - cs.lastInAt < 6 * 3_600_000L && nowMs - cs.lastBotReply > 15_000
+
     /** Chats whose Acompanhamento is due. */
     fun followDue(state: State, nowMs: Long): List<String> = state.chats.filter { it.value.followAt in 1..nowMs }.keys.toList()
 

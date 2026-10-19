@@ -76,6 +76,8 @@ data class Config(
     val takeoverOn: Boolean = true,
     val takeoverMin: Int = 60,
     val takeoverOnRead: Boolean = false,
+    /** You read (also on WhatsApp Web) a message the app did not answer: you are attending, so the chat pauses. */
+    val takeoverOnUnanswered: Boolean = true,
     val loopGuardOn: Boolean = true,
     val contactsOn: Boolean = false,
     val contactsMode: Audience = Audience.EXCEPT_LIST,

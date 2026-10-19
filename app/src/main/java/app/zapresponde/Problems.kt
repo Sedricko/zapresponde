@@ -106,6 +106,10 @@ object Problems {
             out += Problem(0, "Respostas de frete sem planilha conectada", "Sem a planilha de cargas o app não tem o que responder.", "open:frete")
         if (cfg.followOn && cfg.followLink.isBlank()) out += Problem(1, "Link do grupo ligado sem link", "Nada será enviado até você colar o link do grupo.", "open:follow")
         if ((cfg.aiDiagOn || cfg.aiOn) && cfg.aiKey.isBlank()) out += Problem(2, "IA ligada sem chave do Gemini", "Cole a chave em Assistente de IA.", "open:ai")
+        if (!cfg.takeoverOn) out += Problem(
+            1, "Pausa quando você assume está desligada",
+            "O app continua respondendo mesmo quando você está conversando, inclusive pelo WhatsApp Web.", "open:takeover",
+        )
         if (approvalsPending > 0) out += Problem(1, "$approvalsPending resposta(s) esperando você tocar em Enviar", "Veja as notificações do ZapResponde.")
 
         // The freight sheet.

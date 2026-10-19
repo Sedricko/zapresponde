@@ -293,10 +293,16 @@ class ReplyService : NotificationListenerService() {
         // Tapping the notification means you took over. WhatsApp also clears it when the chat is merely read,
         // including on WhatsApp Web, so that only counts if the user asked for it (off by default).
         // Our own reply also makes WhatsApp clear it, so ignore removals right after we answered.
-        val tookOver = reason == REASON_CLICK || (cfg.takeoverOnRead && reason == REASON_APP_CANCEL && now - lastBot > 15_000)
+        val readUnanswered = cfg.takeoverOnUnanswered && reason == REASON_APP_CANCEL && Engine.readMeansTakeover(Store.state.chats[msg.chat], now)
+        val tookOver = reason == REASON_CLICK || readUnanswered || (cfg.takeoverOnRead && reason == REASON_APP_CANCEL && now - lastBot > 15_000)
         if (tookOver) {
             pending.remove(msg.chat)?.cancel()
             Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)
+            Store.log(msg.chat, "", when {
+                reason == REASON_CLICK -> "Você tocou na notificação: conversa pausada por ${cfg.takeoverMin} min"
+                readUnanswered -> "Você leu uma mensagem que o app não respondeu: conversa pausada por ${cfg.takeoverMin} min"
+                else -> "Conversa lida: pausada por ${cfg.takeoverMin} min"
+            })
         }
     }
 
