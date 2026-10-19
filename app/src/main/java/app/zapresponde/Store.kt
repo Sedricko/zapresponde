@@ -114,7 +114,6 @@ object Store {
         save("events.json", events)
     }
 
-    @Synchronized
     /**
      * "Limpar dados": what is checked, for one chat or (null) for all. Settings, rules, the Google sheet and the rows still
      * waiting to go to it are never touched. Returns how much was removed, for the confirmation message.
@@ -139,6 +138,7 @@ object Store {
         state.lastClean = now; saveState()
     }
 
+    @Synchronized
     fun addHistory(e: HistoryEntry) {
         history = (listOf(e) + history).take(300)
         save("history.json", history)
