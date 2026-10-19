@@ -178,7 +178,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico", "ruletest" to "Testar regras com a IA",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico", "ruletest" to "Testar regras com a IA", "clean" to "Limpar dados",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -236,6 +236,7 @@ fun App() {
                     "ai" -> AssistantScreen()
                     "help" -> HelpScreen(open)
                     "ruletest" -> RuleTestPanel()
+                    "clean" -> CleanScreen()
                 }
             }
         }
@@ -805,10 +806,64 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Star, "Assistente de IA", "Cria regras e testa as regras com o Gemini", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
         Divider()
+        FeatureRow(Icons.Default.Delete, "Limpar dados", if (c.cleanAutoOn) "Automático: mantém ${keepLabel(c.cleanKeepHours)}" else "Histórico, registro e estado das conversas", null) { open("clean") }
+        Divider()
         FeatureRow(Icons.Default.Lock, "Backup", "Google Drive, pCloud, arquivo ou planilha", null) { open("backup") }
     }
     val ctx = LocalContext.current
     Hint("ZapResponde versão " + ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
+}
+
+private val KEEP = listOf(24 to "24 horas", 168 to "7 dias", 360 to "15 dias", 720 to "30 dias")
+private fun keepLabel(h: Int) = KEEP.firstOrNull { it.first == h }?.second ?: "$h h"
+
+@Composable
+fun CleanScreen() {
+    val c = Store.config
+    var history by remember { mutableStateOf(true) }
+    var events by remember { mutableStateOf(true) }
+    var chats by remember { mutableStateOf(true) }
+    var waiting by remember { mutableStateOf(true) }
+    var chat by rememberSaveable { mutableStateOf("") }
+    var confirm by remember { mutableStateOf(false) }
+    var done by remember { mutableStateOf("") }
+    val who = chat.trim().ifEmpty { null }
+    Hint("Para testar do zero: limpa o que o app guardou das conversas. Configurações, regras e a planilha do Google nunca são apagadas.")
+    Panel("Limpar agora") {
+        Field("Só desta conversa (vazio = todas)", chat, help = "O nome como aparece no Histórico, ex.: Johon") { chat = it }
+        val recent = remember { (Store.history.map { it.chat } + Store.events.map { it.chat }).filter { it != "(sistema)" && it.isNotBlank() }.distinct().take(8) }
+        if (recent.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            recent.forEach { n -> OutlinedButton({ chat = n }) { Text(n, maxLines = 1) } }
+        }
+        fun n(l: List<String>) = l.count { who == null || it == who }
+        SwitchRow("Histórico de respostas", history, "${n(Store.history.map { it.chat })} respostas · aba Histórico e números da Início") { history = it }
+        SwitchRow("Registro do Diagnóstico", events, "${n(Store.events.map { it.chat })} mensagens · motivos e problemas") { events = it }
+        SwitchRow("Estado das conversas", chats, "${n(Store.state.chats.keys.toList())} conversas · pausas, boas-vindas, regras \"uma vez\", link do grupo e carga já enviados") { chats = it }
+        SwitchRow("Pedidos esperando carga", waiting, "${n(Store.state.waiting.map { it.chat })} pedidos") { waiting = it }
+        Button({ confirm = true }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = history || events || chats || waiting) {
+            Icon(Icons.Default.Delete, null); Spacer(Modifier.width(6.dp)); Text(if (who == null) "Limpar de todas as conversas" else "Limpar só de $who")
+        }
+        if (done.isNotEmpty()) Text("✅ Apagado: $done", color = MaterialTheme.colorScheme.primary)
+    }
+    Panel("Limpar automaticamente") {
+        SwitchRow("Limpar sozinho todo dia", c.cleanAutoOn, "Histórico e Registro mais antigos que o tempo abaixo") { cfg { copy(cleanAutoOn = it) } }
+        KEEP.forEach { (h, label) ->
+            Row(Modifier.fillMaxWidth().clickable { cfg { copy(cleanKeepHours = h) } }, verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(c.cleanKeepHours == h, { cfg { copy(cleanKeepHours = h) } })
+                Text("Manter $label")
+            }
+        }
+        Hint("O estado das conversas fica fora da limpeza automática: apagar sozinho faria os contatos receberem boas-vindas e o link do grupo de novo. Esse você limpa acima, à mão.")
+    }
+    if (confirm) AlertDialog(
+        onDismissRequest = { confirm = false },
+        title = { Text("Apagar?") },
+        text = { Text((if (who == null) "De todas as conversas: " else "Da conversa $who: ") + listOfNotNull(
+            "histórico".takeIf { history }, "registro".takeIf { events }, "estado das conversas".takeIf { chats }, "pedidos esperando".takeIf { waiting },
+        ).joinToString() + ". Não dá para desfazer.") },
+        confirmButton = { TextButton({ done = Store.clear(history, events, chats, waiting, who); confirm = false }) { Text("Apagar") } },
+        dismissButton = { TextButton({ confirm = false }) { Text("Cancelar") } },
+    )
 }
 
 @Composable

@@ -127,6 +127,9 @@ data class Config(
     val followLink: String = "",
     /** Frases que mostram que o contato já está no grupo; separadas por vírgula. */
     val followJoined: String = "já estou no grupo, já to no grupo, já sou do grupo, já participo, já faço parte, já estou nele, já entrei",
+    /** Limpar dados automaticamente: keeps only the last [cleanKeepHours] of Histórico and Registro (24, 168, 360 or 720). */
+    val cleanAutoOn: Boolean = false,
+    val cleanKeepHours: Int = 168,
     /** Avisa na hora (vibra) quando o diagnóstico acha um problema grave, como respostas repetidas a um robô. */
     val problemAlertOn: Boolean = false,
     /** Diagnóstico pela IA: manda o relatório (com textos das mensagens) ao Gemini para explicar as decisões. */
@@ -161,6 +164,8 @@ data class Waiting(val chat: String, val from: List<String>, val to: List<String
 class State(
     val chats: MutableMap<String, ChatState> = mutableMapOf(),
     var lastBackup: Long = 0,
+    /** Last automatic cleanup ("Limpar dados"), so it runs once a day. */
+    var lastClean: Long = 0,
     /** "Avisar quando a carga aparecer": requests waiting for a load. */
     val waiting: MutableList<Waiting> = mutableListOf(),
 )

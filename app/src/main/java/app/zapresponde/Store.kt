@@ -115,6 +115,30 @@ object Store {
     }
 
     @Synchronized
+    /**
+     * "Limpar dados": what is checked, for one chat or (null) for all. Settings, rules, the Google sheet and the rows still
+     * waiting to go to it are never touched. Returns how much was removed, for the confirmation message.
+     */
+    @Synchronized
+    fun clear(history: Boolean, events: Boolean, chats: Boolean, waiting: Boolean, chat: String?): String {
+        fun mine(c: String) = chat == null || c == chat
+        val out = mutableListOf<String>()
+        if (history) { val n = this.history.count { mine(it.chat) }; this.history = this.history.filterNot { mine(it.chat) }; save("history.json", this.history); out += "$n respostas" }
+        if (events) { val n = this.events.count { mine(it.chat) }; this.events = this.events.filterNot { mine(it.chat) }; save("events.json", this.events); out += "$n registros" }
+        if (chats) { val keys = state.chats.keys.filter(::mine); keys.forEach { state.chats.remove(it) }; out += "${keys.size} conversas" }
+        if (waiting) { val n = state.waiting.count { mine(it.chat) }; state.waiting.removeAll { mine(it.chat) }; out += "$n pedidos esperando carga" }
+        if (chats || waiting) saveState()
+        return out.joinToString()
+    }
+
+    /** Automatic cleanup: Histórico and Registro older than [keepMs]; the chats' state stays (it would resend welcomes and links). */
+    @Synchronized
+    fun prune(now: Long, keepMs: Long) {
+        history = history.filter { now - it.time < keepMs }; save("history.json", history)
+        events = events.filter { now - it.time < keepMs }; save("events.json", events)
+        state.lastClean = now; saveState()
+    }
+
     fun addHistory(e: HistoryEntry) {
         history = (listOf(e) + history).take(300)
         save("history.json", history)

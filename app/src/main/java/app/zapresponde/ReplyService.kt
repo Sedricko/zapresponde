@@ -51,7 +51,14 @@ class ReplyService : NotificationListenerService() {
     override fun onListenerConnected() {
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
-        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck(); problemCheck() } }
+        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck(); problemCheck(); cleanCheck() } }
+    }
+
+    /** "Limpar dados automaticamente", once a day. */
+    private fun cleanCheck() {
+        val cfg = Store.config
+        val now = System.currentTimeMillis()
+        if (cfg.cleanAutoOn && now - Store.state.lastClean > 24 * 3_600_000L) Store.prune(now, cfg.cleanKeepHours * 3_600_000L)
     }
 
     /** Grave problems already alerted, so each one vibrates once (until the app restarts). */
