@@ -442,4 +442,16 @@ class EngineTest {
         assertTrue(Engine.readMeansTakeover(st.chats["José"], 4 * 60 * m + 3 * m))
         assertFalse(Engine.readMeansTakeover(null, 0))
     }
+
+    @Test fun ecoSemAsteriscos() {
+        val sheet = listOf(listOf("x", ""), listOf("Alagoinhas/BA para Arapiraca/AL", "✨ 🚛 *FRETE DISPONÍVEL*\n━━━━\n\n🏭 *ORIGEM:* ALAGOINHAS/BA\n📍 *DESTINO:* ARAPIRACA/AL\n💰 *VALOR:* R$ 5.000,00\n• Coleta: Seg 02/11 08:00"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true)
+        val rule = Rule(match = Match.ALL, replies = listOf("regra"))
+        val st = State()
+        run(msg("estou disponível para carregar seu frete de Alagoinhas/BA para Arapiraca/AL", sender = "Agenilton"), listOf(rule), cfg, state = st, consulta = sheet)
+        // 01/11 20:38: the load came back as "Você" without asterisks nor the ✨.
+        val echo = "🚛 FRETE DISPONÍVEL\n━━━━\n\n🏭 ORIGEM: ALAGOINHAS/BA\n📍 DESTINO: ARAPIRACA/AL\n💰 VALOR: R$ 5.000,00\n• Coleta: Seg 02/11 08:00"
+        assertEquals("Mensagem é uma resposta nossa", run(msg(echo, sender = "Você"), listOf(rule), cfg, state = st, consulta = sheet).reason)
+        assertFalse(Engine.isEcho(st, "ok"))
+    }
 }

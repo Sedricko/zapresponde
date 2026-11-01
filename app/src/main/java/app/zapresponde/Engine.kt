@@ -39,7 +39,7 @@ object Engine {
         // Answering this would send the bot's reply to the contact because *you* wrote; ReplyService treats it as takeover.
         if (msg.fromMe) {
             // You wrote in the chat: you took over, so a pending Acompanhamento is cancelled (our own reply echoed back is not you).
-            state.chats[msg.chat]?.takeIf { msg.text !in it.lastTexts && it.followAt > 0 }?.followAt = 0
+            state.chats[msg.chat]?.takeIf { !isEcho(state, msg.text) && it.followAt > 0 }?.followAt = 0
             return skip("Mensagem enviada por você na conversa")
         }
         t += "✅ Mensagem de outra pessoa (${if (msg.isGroup) "grupo ${msg.chat}" else msg.sender})"
@@ -60,7 +60,7 @@ object Engine {
         }
         if (cs.pauseUntil > nowMs) { cs.followAt = 0; return skip("Conversa pausada") }
         // A message equal to something we just sent is our own reply echoed back, in this chat or another WhatsApp on the phone.
-        if (state.chats.values.any { c -> c.lastTexts.any { it.trim() == msg.text.trim() } }) return skip("Mensagem é uma resposta nossa")
+        if (isEcho(state, msg.text)) return skip("Mensagem é uma resposta nossa")
         // WhatsApp sometimes posts the same message again (a new notification time); answering it twice looks broken.
         if (msg.text == cs.lastInText && nowMs - cs.lastInAt < 120_000) return skip("Mensagem repetida em menos de 2 min: já tratada")
         cs.lastInText = msg.text; cs.lastInAt = nowMs
@@ -206,6 +206,21 @@ object Engine {
      */
     fun readMeansTakeover(cs: ChatState?, nowMs: Long): Boolean =
         cs != null && cs.lastInAt > cs.lastBotReply && nowMs - cs.lastInAt < 6 * 3_600_000L && nowMs - cs.lastBotReply > 15_000
+
+    /** Letters and digits only: the notification shows our *bold* without asterisks and may drop emojis or cut long texts. */
+    private fun echoKey(s: String) = normalize(s).replace(Regex("[^a-z0-9]"), "")
+
+    /**
+     * The message is one of our recent replies coming back (as "Você" on this phone or the other WhatsApp): the load ad
+     * came back as "🚛 FRETE DISPONÍVEL" without the asterisks, so plain equality missed it.
+     */
+    fun isEcho(state: State, text: String): Boolean {
+        val k = echoKey(text)
+        if (k.isEmpty()) return false
+        return state.chats.values.any { c ->
+            c.lastTexts.any { mine -> val m = echoKey(mine); m == k || (k.length >= 40 && (m.startsWith(k) || m.contains(k))) }
+        }
+    }
 
     /** Chats whose Acompanhamento is due. */
     fun followDue(state: State, nowMs: Long): List<String> = state.chats.filter { it.value.followAt in 1..nowMs }.keys.toList()

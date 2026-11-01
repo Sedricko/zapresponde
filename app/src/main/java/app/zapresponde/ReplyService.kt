@@ -189,7 +189,7 @@ class ReplyService : NotificationListenerService() {
         val cfg = Store.config
         val now = System.currentTimeMillis()
         val cs = Store.state.chats[msg.chat]
-        if (msg.fromMe && cfg.takeoverOn && msg.text !in cs?.lastTexts.orEmpty() && now - (cs?.lastBotReply ?: 0) > 15_000) {
+        if (msg.fromMe && cfg.takeoverOn && !Engine.isEcho(Store.state, msg.text) && now - (cs?.lastBotReply ?: 0) > 15_000) {
             pending.remove(msg.chat)?.cancel()
             Store.pauseChat(msg.chat, now + cfg.takeoverMin * 60_000L)
             Store.log(msg.chat, msg.text, "Mensagem sua: conversa pausada por ${cfg.takeoverMin} min")

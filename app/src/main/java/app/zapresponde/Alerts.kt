@@ -47,7 +47,9 @@ object Alerts {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         post(ctx, id, base(ctx, title, reply, open).setAutoCancel(false)
-            .addAction(0, "Enviar", act(true)).addAction(0, "Descartar", act(false)))
+            .addAction(0, "Enviar", act(true)).addAction(0, "Descartar", act(false))
+            // Swiping it away is "Descartar": otherwise it stays counted as waiting for you forever.
+            .setDeleteIntent(act(false)))
     }
 
     fun cancel(ctx: Context, id: Int) = NotificationManagerCompat.from(ctx).cancel(id)
