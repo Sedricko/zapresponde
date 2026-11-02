@@ -361,11 +361,14 @@ class ReplyService : NotificationListenerService() {
             n.actions?.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
                 ?: Notification.WearableExtender(n).actions.firstOrNull { !it.remoteInputs.isNullOrEmpty() }
 
+        // The typed replacement exists only from Android 13; the app runs from Android 10, where this one is the API.
+        @Suppress("DEPRECATION")
         private fun lastMessage(n: Notification): Bundle? =
             n.extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull() as? Bundle
 
         private fun lastMessageTime(n: Notification) = lastMessage(n)?.getLong("time") ?: n.`when`
 
+        @Suppress("DEPRECATION") // Bundle.get: "sender_person" is a Person or absent; only null-ness matters, on every Android version.
         fun parse(sbn: StatusBarNotification): Incoming? {
             val n = sbn.notification
             val ex = n.extras

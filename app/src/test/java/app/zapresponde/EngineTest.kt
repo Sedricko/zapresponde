@@ -472,4 +472,30 @@ class EngineTest {
         assertTrue(p.any { it.title == "Erro interno em aviso de carga: 2 vez(es)" && it.level == 1 })
         assertTrue(Problems.summary(ev, emptyList(), now)[0].startsWith("ℹ️ Mensagens recebidas: 0"))
     }
+
+    @Test fun bordas() {
+        val sheet = listOf(listOf("x", ""), listOf("Goiânia/GO para Anápolis/GO", "carga"))
+        val cfg = on.copy(freteOn = true, freteLivreOn = true, altOn = true, waitOn = true, followOn = true, followLink = "L")
+        val rules = listOf(
+            Rule(name = "Parecida", match = Match.SIMILAR, keywords = "bom dia", replies = listOf("a")),
+            Rule(name = "Regex quebrada", match = Match.REGEX, keywords = "([", replies = listOf("b")),
+            Rule(name = "Curinga", match = Match.WILDCARD, keywords = "*frete*//", replies = listOf("c")),
+        )
+        // Empty, only spaces, emoji only, accents and a huge message: no crash, a decision every time.
+        for (t in listOf("", "   ", "🚛🚛🚛", "ÁÉÍÓÚ ãõç Ç", "frete ".repeat(5_000), "\u0000\n\t")) {
+            val d = run(msg(t), rules, cfg, consulta = sheet)
+            assertTrue(t.take(20), d.reason.isNotEmpty())
+        }
+        // An invalid regex never answers nor throws.
+        assertFalse(Engine.matches(rules[1], "(["))
+        // Times out of range or written wrong are ignored, not a crash.
+        assertFalse(Engine.inWindow("25:99-xx", (1..7).toSet(), monday10))
+        assertTrue(Engine.inWindow("", (1..7).toSet(), monday10))
+        // Sheets with odd shapes: no columns, a single cell, a missing B.
+        for (s in listOf(emptyList(), listOf(emptyList()), listOf(listOf("Goiânia/GO para Anápolis/GO")))) {
+            Engine.freteLivre("Goiânia para Anápolis", s)
+            Engine.waitingFound(State(), s, monday10, 0, 24)
+            Engine.keepLoads(s, s)
+        }
+    }
 }
