@@ -60,6 +60,7 @@ object Store {
         events = load("events.json") ?: emptyList()
         state = load("state.json") ?: State()
         outbox = load("outbox.json") ?: Outbox()
+        undo = load("undo.json") ?: Undo()
         // The app closed by an error last time: the handler below left the reason in crash.txt.
         File(dir, "crash.txt").takeIf { it.exists() }?.let { f ->
             log(INTERNAL, "O app fechou por erro", f.readText().lines().first().take(300), f.readText().lines().drop(1).take(6))
@@ -96,6 +97,23 @@ object Store {
             tmp.writeText(text)
             tmp.renameTo(File(dir, name))
         }
+    }
+
+    /** Settings and rules before the last change the AI applied, so "Desfazer" can bring them back (also after a restart). */
+    @Serializable
+    data class Undo(val time: Long = 0, val backup: String = "")
+
+    var undo by mutableStateOf(Undo())
+        private set
+
+    @Synchronized
+    fun saveUndo() { undo = Undo(System.currentTimeMillis(), exportBackup()); save("undo.json", undo) }
+
+    @Synchronized
+    fun undoAi() {
+        if (undo.backup.isEmpty()) return
+        importBackup(undo.backup)
+        undo = Undo(); save("undo.json", undo)
     }
 
     fun exportBackup(): String = json.encodeToString(Backup(config = config.copy(aiKey = ""), rules = rules))

@@ -175,7 +175,7 @@ private val TABS = listOf(
 private val TITLES = mapOf(
     "welcome" to "Boas-vindas", "form" to "Pedido pela conversa", "delay" to "Atraso humano",
     "schedule" to "Agenda", "header" to "Cabeçalho e rodapé", "takeover" to "Pausa quando você assume",
-    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico", "ruletest" to "Testar regras com a IA", "clean" to "Limpar dados",
+    "loop" to "Proteção contra loop", "contacts" to "Contatos", "backup" to "Backup", "approval" to "Aprovar antes de enviar", "frete" to "Respostas de frete", "follow" to "Link do grupo depois da conversa", "alt" to "Oferecer outra carga", "wait" to "Avisar quando a carga aparecer", "ai" to "Assistente de IA", "test" to "Testar respostas", "help" to "Diagnóstico", "clean" to "Limpar dados",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -232,7 +232,6 @@ fun App() {
                     "test" -> TestScreen()
                     "ai" -> AssistantScreen()
                     "help" -> HelpScreen(open)
-                    "ruletest" -> RuleTestPanel()
                     "clean" -> CleanScreen()
                 }
             }
@@ -797,11 +796,9 @@ fun MoreTab(open: (String) -> Unit) {
     Panel("Ferramentas") {
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
         Divider()
-        FeatureRow(Icons.Default.CheckCircle, "Testar regras com a IA", "Escolha as regras; a IA cria as mensagens e testa sozinha", null) { open("ruletest") }
-        Divider()
         FeatureRow(Icons.Default.Info, "Diagnóstico", "Por que respondeu ou não · IA ${on(c.aiDiagOn)}", null) { open("help") }
         Divider()
-        FeatureRow(Icons.Default.Star, "Assistente de IA", "Cria regras e testa as regras com o Gemini", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
+        FeatureRow(Icons.Default.Star, "Assistente de IA", "Peça mudanças em português: ajustes e regras; testa as regras", c.aiOn, { on -> cfg { copy(aiOn = on) } }) { open("ai") }
         Divider()
         FeatureRow(Icons.Default.Delete, "Limpar dados", if (c.cleanAutoOn) "Automático: mantém ${keepLabel(c.cleanKeepHours)}" else "Histórico, registro e estado das conversas", null) { open("clean") }
         Divider()
@@ -1203,82 +1200,96 @@ fun FreteScreen() {
     }
 }
 
+/** A request handed to the assistant by another screen ("Corrigir com a IA" in the Diagnóstico): text + context. */
+object AiPrefill { var request by mutableStateOf(""); var context by mutableStateOf("") }
+
 @Composable
 fun AssistantScreen() {
     val c = Store.config
     val scope = rememberCoroutineScope()
     var request by rememberSaveable { mutableStateOf("") }
-    var draft by remember { mutableStateOf<Assistant.Draft?>(null) }
+    var context by remember { mutableStateOf("") }
+    var proposal by remember { mutableStateOf<AiConfig.Proposal?>(null) }
+    var chosen by remember { mutableStateOf(setOf<Int>()) }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     fun ask() {
-        busy = true; status = "Pedindo ao Gemini..."
-        val current = draft?.rule
+        busy = true; status = "Pedindo ao Gemini..."; proposal = null
         scope.launch {
             runCatching {
-                withContext(Dispatchers.IO) { Assistant.parse(Assistant.gemini(c.aiKey, c.aiModel, Assistant.prompt(request, current))) }
-            }.fold({ draft = it; status = ""; request = "" }, { status = it.message ?: "Falhou: tente de novo." })
+                withContext(Dispatchers.IO) {
+                    AiConfig.parse(Assistant.gemini(c.aiKey, c.aiModel, AiConfig.prompt(request, Store.config, Store.rules, context)), Store.config, Store.rules)
+                }
+            }.fold({ p ->
+                proposal = p
+                chosen = p.changes.indices.filter { p.changes[it].problems.isEmpty() }.toSet()
+                status = if (p.changes.isEmpty()) "A IA não propôs nenhuma mudança." else ""
+            }, { status = it.message ?: "Falhou: tente de novo." })
             busy = false
         }
     }
+    // Arriving from the Diagnóstico's "Corrigir com a IA": the request is filled in and sent right away.
+    LaunchedEffect(AiPrefill.request) {
+        if (AiPrefill.request.isNotEmpty() && c.aiOn && c.aiKey.isNotBlank()) {
+            request = AiPrefill.request; context = AiPrefill.context
+            AiPrefill.request = ""; AiPrefill.context = ""
+            ask()
+        }
+    }
+    Hint("Peça em português o que quer mudar no app: a IA propõe as mudanças (ajustes e regras) e você escolhe o que aplicar. Nada muda sem o seu toque.")
     Panel {
         SwitchRow("Ativar assistente de IA", c.aiOn) { cfg { copy(aiOn = it) } }
         Field("Chave da API do Gemini", c.aiKey, help = "Crie grátis em aistudio.google.com/apikey e cole aqui") { cfg { copy(aiKey = it.trim()) } }
         Advanced { Field("Modelo", c.aiModel, help = "Padrão: gemini-flash-latest") { cfg { copy(aiModel = it.trim()) } } }
     }
-    Panel(if (draft == null) "O que a regra deve fazer?" else "Quer ajustar alguma coisa?") {
-        Field(
-            if (draft == null) "Pedido" else "Ajuste", request, 3,
-            help = if (draft == null) "Ex.: quando perguntarem preço, responder \"a partir de R$ 50\", de segunda a sexta das 8h às 18h, uma vez por conversa"
-            else "Ex.: muda o horário para 7h às 17h",
-        ) { request = it }
+    Panel("O que você quer mudar?") {
+        Field("Pedido", request, lines = 2, maxLines = 5,
+            help = "Ex.: \"muda o link do grupo para 30 minutos\" · \"coloca Frete Bras Publicações nas exceções\" · \"quando perguntarem quanto tá pagando, responde que o valor está na carga\"") { request = it; context = "" }
         Button({ ask() }, Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank() && request.isNotBlank() && !busy) {
-            Icon(Icons.AutoMirrored.Filled.Send, null); Spacer(Modifier.width(6.dp)); Text(if (draft == null) "Criar regra" else "Ajustar regra")
+            Icon(Icons.AutoMirrored.Filled.Send, null); Spacer(Modifier.width(6.dp)); Text("Pedir à IA")
         }
+        if (context.isNotEmpty()) Hint("A IA também recebeu o diagnóstico mais recente.")
         if (status.isNotEmpty()) Text(status, color = if (busy || status.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        if (!c.aiOn || c.aiKey.isBlank()) Hint("Ligue o assistente e cole a chave acima. Só o seu pedido vai para o Gemini; mensagens de clientes não são enviadas.")
+        if (!c.aiOn || c.aiKey.isBlank()) Hint("Ligue o assistente e cole a chave acima. Vão para o Gemini os seus ajustes e regras (sem chaves nem link da planilha) e o seu pedido.")
     }
-    draft?.let { d ->
-        val r = d.rule
-        Panel("Regra sugerida") {
-            Text(r.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                listOfNotNull(
-                    r.match.label + if (r.match != Match.ALL) ": ${r.keywords}" else "",
-                    r.exclude.takeIf { it.isNotBlank() }?.let { "Exceto: $it" },
-                    r.freq.label + when (r.freq) { Freq.INTERVAL -> " (${r.intervalMin} min)"; Freq.MAX -> " (${r.maxReplies})"; else -> "" },
-                    "Horário: " + r.hours.ifBlank { "o dia todo" } + if (r.days.size < 7) " · dias ${r.days.sorted().joinToString()}" else "",
-                    "Quem: ${r.who.label} · grupos: ${r.groups.label}",
-                ).joinToString("\n"),
-                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp),
-            )
-            r.replies.filter { it.isNotBlank() }.forEach {
-                Box(
-                    Modifier.padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp),
-                ) { Text(it, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+    proposal?.let { p ->
+        if (p.changes.isNotEmpty() || p.ignored.isNotEmpty()) Panel("Mudanças propostas") {
+            if (p.explanation.isNotBlank()) Text(p.explanation, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 6.dp))
+            p.changes.forEachIndexed { i, ch ->
+                if (i > 0) Divider()
+                Row(Modifier.fillMaxWidth().clickable(enabled = ch.problems.isEmpty()) { chosen = if (i in chosen) chosen - i else chosen + i }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.Top) {
+                    Checkbox(i in chosen, { chosen = if (it) chosen + i else chosen - i }, enabled = ch.problems.isEmpty())
+                    Column(Modifier.weight(1f)) {
+                        Text(ch.label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Antes: ${ch.before}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Depois: ${ch.after}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        ch.problems.forEach { Text("❌ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            }
+            p.ignored.forEach { Text("ℹ️ Não aplicável: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (p.changes.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ proposal = null; status = "" }, Modifier.weight(1f)) { Text("Descartar") }
+                Button({
+                    Store.saveUndo()
+                    val (newCfg, newRules) = AiConfig.apply(Store.config, Store.rules, p.changes.filterIndexed { i, _ -> i in chosen })
+                    Store.updateConfig(newCfg); Store.updateRules(newRules)
+                    status = "✅ ${chosen.size} mudança(s) aplicada(s). Dá para desfazer logo abaixo."
+                    proposal = null; request = ""
+                }, Modifier.weight(1f), enabled = chosen.isNotEmpty()) { Text("Aplicar ${chosen.size}") }
             }
         }
-        val results = Assistant.check(d)
-        Panel("Teste automático") {
-            if (results.isEmpty()) Hint("A IA não mandou exemplos. Use Testar respostas depois de aplicar.")
-            results.forEach { (e, ok) ->
-                Text("${if (ok) "✅" else "❌"} \"${e.text}\" → ${if (e.shouldReply) "deve responder" else "não deve responder"}${if (ok) "" else " (não bateu)"}")
-            }
-            d.problems.forEach { Text("❌ $it", color = MaterialTheme.colorScheme.error) }
-            Hint("O teste confere as palavras. Horário, contatos e frequência valem quando a mensagem real chegar.")
+    }
+    if (Store.undo.backup.isNotEmpty()) Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Última mudança da IA: ${fmt(Store.undo.time)}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ Store.undoAi(); status = "✅ Desfeito: ajustes e regras voltaram ao que eram." }) { Text("Desfazer") }
         }
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton({ draft = null; status = "" }, Modifier.weight(1f)) { Text("Descartar") }
-            Button({
-                Store.updateRules(Store.rules + r); draft = null; status = "✅ Regra \"${r.name}\" aplicada. Ela está na aba Regras."
-            }, Modifier.weight(1f), enabled = d.problems.isEmpty()) { Text("Aplicar") }
-        }
-        if (d.problems.isEmpty() && !results.all { it.second }) Hint("Algum teste não bateu: o melhor é pedir um ajuste antes de aplicar.")
     }
     RuleTestPanel()
 }
 
-/** A IA cria mensagens para as regras escolhidas; o app confere qual regra responde cada uma e mostra o que não bateu. */
 @Composable
 private fun RuleTestPanel(only: String? = null) {
     val c = Store.config
@@ -1447,6 +1458,17 @@ fun HelpScreen(open: (String) -> Unit) {
     }
     if (answer.isNotEmpty()) Panel("Análise da IA") {
         Text(answer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+    }
+    // Problems found → the assistant proposes the fixes (each one still applied only with your tap).
+    if (report.isNotEmpty() && !busy && (problems.orEmpty().any { it.level <= 1 } || internal.any { "❌" in it || "⚠️" in it })) {
+        Button({
+            AiPrefill.context = (if (answer.isNotEmpty() && !answer.startsWith("❌")) "ANÁLISE DA IA\n$answer\n\n" else "") + report
+            AiPrefill.request = "Corrija os problemas e conflitos apontados no diagnóstico. Mude só o necessário e não mexa no que está funcionando."
+            open("ai")
+        }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank()) {
+            Icon(Icons.Default.Star, null); Spacer(Modifier.width(6.dp)); Text("Corrigir com a IA")
+        }
+        if (!c.aiOn || c.aiKey.isBlank()) Hint("Para corrigir com a IA, ligue o Assistente de IA e cole a chave do Gemini.")
     }
     if (report.isNotEmpty() && !busy) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton({ share(report, "Enviar relatório") }, Modifier.weight(1f)) { Text("Compartilhar relatório") }

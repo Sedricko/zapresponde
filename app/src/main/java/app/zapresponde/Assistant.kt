@@ -3,9 +3,7 @@ package app.zapresponde
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -16,19 +14,12 @@ import kotlinx.serialization.json.putJsonObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Assistente de IA: transforma um pedido em português numa [Rule], que o usuário testa e aplica. */
+/** Assistente de IA: chamadas ao Gemini, testes de regras e o diagnóstico. As mudanças no app ficam em [AiConfig]. */
 object Assistant {
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** Mensagem de exemplo e se a regra deveria responder a ela. */
-    data class Example(val text: String, val shouldReply: Boolean)
-
-    /** Regra sugerida, exemplos para testar e problemas encontrados (vazio = pode aplicar). */
-    data class Draft(val rule: Rule, val examples: List<Example>, val problems: List<String>)
-
-    private val SCHEMA = """
-        Responda só com JSON: {"rule": {...}, "testes": [{"mensagem": "...", "responde": true|false}]}.
-        Campos de "rule" (omita os que ficam no padrão):
+    /** The rule fields, as the AI must write a rule. */
+    val RULE_FIELDS = """
         - name: nome curto da regra
         - match: ALL (qualquer mensagem), CONTAINS (contém uma das palavras), EXACT, STARTS, ENDS, SIMILAR, WILDCARD (* e // separa padrões), REGEX
         - keywords: palavras ou frases separadas por vírgula (sem acento não importa; CONTAINS casa palavra inteira)
@@ -39,34 +30,9 @@ object Assistant {
         - groups: NONE (padrão, não responde grupos), ALL, LIST, EXCEPT_LIST; groupList: nomes, um por linha
         - freq: ALWAYS, ONCE (uma vez por conversa), INTERVAL (uma vez a cada intervalMin minutos), MAX (no máximo maxReplies respostas)
         - hours: faixas "HH:MM-HH:MM" separadas por vírgula, vazio = o dia todo; days: lista de 1 (segunda) a 7 (domingo)
-        Não use consulta à planilha. Dê de 3 a 6 testes, com mensagens que devem e que não devem receber resposta.
+        - enabled: true ou false
+        Omita os campos que ficam no padrão. Não use consulta à planilha.
     """.trimIndent()
-
-    fun prompt(request: String, current: Rule?): String = buildString {
-        append("Você configura regras de resposta automática do WhatsApp no app ZapResponde.\n")
-        append(SCHEMA)
-        if (current != null) {
-            append("\n\nRegra atual (ajuste conforme o pedido e devolva a regra inteira):\n")
-            append(json.encodeToString(Rule.serializer(), current))
-        }
-        append("\n\nPedido do usuário: ").append(request.trim())
-    }
-
-    /** Lê a resposta da IA e confere a regra. Lança erro legível se não for JSON de regra. */
-    fun parse(text: String): Draft {
-        val start = text.indexOf('{'); val end = text.lastIndexOf('}')
-        require(start >= 0 && end > start) { "A IA não devolveu uma regra. Tente escrever o pedido de outro jeito." }
-        val o = runCatching { json.parseToJsonElement(text.substring(start, end + 1)).jsonObject }
-            .getOrElse { throw IllegalArgumentException("A IA devolveu um texto que não deu para ler. Tente de novo.") }
-        val raw = o["rule"] as? JsonObject ?: throw IllegalArgumentException("A IA não devolveu uma regra. Tente de novo.")
-        val rule = runCatching { json.decodeFromJsonElement(Rule.serializer(), raw) }
-            .getOrElse { throw IllegalArgumentException("A regra veio com um valor inválido (${it.message?.take(80)}). Tente de novo.") }
-            .copy(id = java.util.UUID.randomUUID().toString(), enabled = true, kind = Kind.TEXT, fromSheet = false)
-        val examples = (o["testes"] as? JsonArray).orEmpty().mapNotNull { e ->
-            runCatching { Example(e.jsonObject["mensagem"]!!.jsonPrimitive.content, e.jsonObject["responde"]!!.jsonPrimitive.boolean) }.getOrNull()
-        }
-        return Draft(rule, examples, problems(rule))
-    }
 
     fun problems(r: Rule): List<String> = buildList {
         if (r.replies.none { it.isNotBlank() }) add("A regra não tem resposta.")
@@ -79,8 +45,6 @@ object Assistant {
         if (r.freq == Freq.MAX && r.maxReplies < 1) add("O máximo de respostas precisa ser pelo menos 1.")
     }
 
-    /** Confere cada exemplo só pelas palavras (horário, contatos e frequência dependem da hora e de quem manda). */
-    fun check(d: Draft): List<Pair<Example, Boolean>> = d.examples.map { it to (Engine.matches(d.rule, it.text) == it.shouldReply) }
 
     /** Mensagem de teste e o nome da regra que deveria responder ("" = nenhuma). */
     data class RuleTest(val text: String, val expected: String)

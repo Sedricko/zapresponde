@@ -199,20 +199,38 @@ class EngineTest {
         assertEquals("Nenhuma regra serviu", run(msg("oi"), emptyList()).reason)
     }
 
-    @Test fun assistantDraft() {
-        val ai = """Claro! {"rule": {"name": "Preço", "match": "CONTAINS", "keywords": "preço, valor", "replies": ["A partir de R$ 50"],
-            "freq": "ONCE", "hours": "08:00-18:00", "days": [1,2,3,4,5], "inventado": 1},
-            "testes": [{"mensagem": "qual o preço?", "responde": true}, {"mensagem": "bom dia", "responde": false}]}"""
-        val d = Assistant.parse(ai)
-        assertEquals("Preço", d.rule.name)
-        assertEquals(Freq.ONCE, d.rule.freq)
-        assertEquals(setOf(1, 2, 3, 4, 5), d.rule.days)
-        assertTrue(d.problems.isEmpty())
-        assertTrue(Assistant.check(d).all { it.second })
-        assertTrue(Assistant.problems(d.rule.copy(hours = "8h às 18h", replies = listOf(""))).size == 2)
-        assertTrue(runCatching { Assistant.parse("""{"rule": {"match": "QUALQUER"}}""") }.isFailure)
-        assertTrue(runCatching { Assistant.parse("não sei") }.isFailure)
-        assertTrue(Assistant.prompt("muda o horário", d.rule).contains("\"name\":\"Preço\""))
+    @Test fun iaAjustaOApp() {
+        val cfg = Config(followMin = 60, contactsList = "Ana")
+        val rules = listOf(Rule(name = "Preço", match = Match.CONTAINS, keywords = "preço", replies = listOf("R$ 50")))
+        val ai = """Claro! {"explicacao": "Mudei o tempo e criei a regra.",
+            "mudancas": [{"campo": "followMin", "valor": 30}, {"campo": "contactsList", "valor": "Ana\nFrete Bras - Publicações"},
+                         {"campo": "aiKey", "valor": "x"}, {"campo": "followOn", "valor": "sim"}, {"campo": "naoExiste", "valor": 1},
+                         {"campo": "waitMode", "valor": "QUALQUER"}, {"campo": "delayOn", "valor": true}],
+            "regras": [{"name": "Valor do frete", "match": "CONTAINS", "keywords": "quanto ta pagando, valor", "replies": ["O valor está na mensagem da carga."]},
+                       {"name": "Preço", "match": "CONTAINS", "keywords": "preço, valor", "replies": [""]}],
+            "remover_regras": ["Inexistente"]}"""
+        val p = AiConfig.parse(ai, cfg, rules)
+        assertEquals("Mudei o tempo e criei a regra.", p.explanation)
+        // Valid changes only; delayOn is already true, so it is no change at all.
+        assertEquals(listOf("followMin", "contactsList", "+regra", "+regra"), p.changes.map { it.key })
+        assertEquals("60" to "30", p.changes[0].before to p.changes[0].after)
+        assertEquals(5, p.ignored.size)
+        assertTrue(p.ignored.any { "aiKey" in it } && p.ignored.any { "não existe" in it } && p.ignored.any { "Inexistente" in it })
+        // Editing "Preço" keeps its id; its empty reply is flagged.
+        val edit = p.changes[3]
+        assertEquals(rules[0].id, edit.rule!!.id)
+        assertTrue(edit.problems.contains("A regra não tem resposta."))
+        val (c2, r2) = AiConfig.apply(cfg, rules, p.changes.take(3))
+        assertEquals(30, c2.followMin)
+        assertEquals("Ana\nFrete Bras - Publicações", c2.contactsList)
+        assertEquals(listOf("Preço", "Valor do frete"), r2.map { it.name })
+        // Removing works, and secrets never reach the AI.
+        val del = AiConfig.parse("""{"remover_regras": ["preço"]}""", cfg, rules)
+        assertTrue(AiConfig.apply(cfg, rules, del.changes).second.isEmpty())
+        val prompt = AiConfig.prompt("x", cfg.copy(aiKey = "SEGREDO", sheetKey = "CHAVE"), rules)
+        assertTrue("SEGREDO" !in prompt && "CHAVE" !in prompt && "followMin" in prompt)
+        assertTrue(Assistant.problems(rules[0].copy(hours = "8h às 18h", replies = listOf(""))).size == 2)
+        assertTrue(runCatching { AiConfig.parse("não sei", cfg, rules) }.isFailure)
     }
 
     @Test fun freteLivre() {
