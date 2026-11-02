@@ -17,7 +17,10 @@ jobs:
       # Compile errors and failed tests also become annotations, readable through the API when the log download is blocked.
       - run: |
           set -o pipefail
-          gradle --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee build.log || {
+          gradle --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee build.log && {
+            grep -E "^w: " build.log | sed 's#file:///home/runner/work/zapresponde/zapresponde/##' | head -40 | while IFS= read -r l; do echo "::warning::$l"; done
+            true
+          } || {
             { grep -E "e: |FAILED|What went wrong" -A3 build.log | head -30; tail -25 build.log; } | while IFS= read -r l; do echo "::error::$l"; done
             exit 1
           }

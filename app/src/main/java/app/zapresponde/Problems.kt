@@ -86,6 +86,15 @@ object Problems {
             )
         }
 
+        // The app's own errors: a crash is grave, an error it survived is worth a look when it repeats.
+        day.filter { it.chat == "(erro interno)" }.groupBy { it.text }.forEach { (where, l) ->
+            val crash = where == "O app fechou por erro"
+            out += Problem(
+                if (crash) 0 else 1, if (crash) "O app fechou por erro ${l.size} vez(es)" else "Erro interno em $where: ${l.size} vez(es)",
+                "Último: ${l.first().result}" + if (l.first().trace.isNotEmpty()) "\n" + l.first().trace.take(3).joinToString("\n") else "",
+            )
+        }
+
         // Things that did not go out.
         listOf(
             "Acompanhamento não enviado" to "Links do grupo não enviados",
@@ -132,7 +141,7 @@ object Problems {
 
     /** Last 24 h in numbers: received, answered, ignored by reason, and the kinds of replies. */
     fun summary(events: List<LogEntry>, history: List<HistoryEntry>, now: Long): List<String> {
-        val day = events.filter { now - it.time < 24 * 60 * MIN && it.chat != "(sistema)" && it.text.isNotEmpty() }
+        val day = events.filter { now - it.time < 24 * 60 * MIN && it.chat != "(sistema)" && it.chat != "(erro interno)" && it.text.isNotEmpty() }
         val answered = day.count { it.result.startsWith("Respondido") }
         val ignored = day.filter { !it.result.startsWith("Respondido") && !it.result.startsWith("Aguardando") }
         val kinds = history.filter { now - it.time < 24 * 60 * MIN }.groupingBy { it.kind.ifEmpty { replyKind(it.rule, it.reply) } }.eachCount()

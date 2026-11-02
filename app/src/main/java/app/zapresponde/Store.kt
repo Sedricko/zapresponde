@@ -60,6 +60,26 @@ object Store {
         events = load("events.json") ?: emptyList()
         state = load("state.json") ?: State()
         outbox = load("outbox.json") ?: Outbox()
+        // The app closed by an error last time: the handler below left the reason in crash.txt.
+        File(dir, "crash.txt").takeIf { it.exists() }?.let { f ->
+            log(INTERNAL, "O app fechou por erro", f.readText().lines().first().take(300), f.readText().lines().drop(1).take(6))
+            f.delete()
+        }
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            // Written right away (not through the writer thread): the process is about to die.
+            runCatching { File(dir, "crash.txt").writeText("${e.javaClass.simpleName}: ${e.message}\n" + e.stackTrace.take(6).joinToString("\n")) }
+            previous?.uncaughtException(t, e)
+        }
+    }
+
+    /** Chat name of the internal-error records ("Funcionamento interno" in the diagnostic). */
+    const val INTERNAL = "(erro interno)"
+
+    /** Records an error the app survived: where it happened and why, with the first lines of the stack. */
+    fun error(where: String, e: Throwable) {
+        android.util.Log.w("ZapResponde", where, e)
+        log(INTERNAL, where, "${e.javaClass.simpleName}: ${e.message}".take(300), e.stackTrace.take(4).map { "at $it" })
     }
 
     private inline fun <reified T> load(name: String): T? = runCatching {

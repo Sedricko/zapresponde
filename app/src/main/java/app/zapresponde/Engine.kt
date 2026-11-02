@@ -294,7 +294,8 @@ object Engine {
 
     fun matches(r: Rule, text: String): Boolean {
         val t = normalize(text)
-        if (splitList(r.exclude).any { t.contains(normalize(it)) }) return false
+        // Whole words, like the keywords: excluding "oi" must not exclude "dois".
+        if (splitList(r.exclude).any { hasWord(t, normalize(it)) }) return false
         val keys = splitList(r.keywords).map { normalize(it) }
         return when (r.match) {
             Match.ALL -> true

@@ -7,8 +7,8 @@ import android.provider.ContactsContract
 
 /** The phone's address book, read only to pick contacts and to tell saved contacts from unknown numbers. */
 object Contacts {
-    private var cache: Set<String> = emptySet()
-    private var cachedAt = 0L
+    @Volatile private var cache: Set<String> = emptySet()
+    @Volatile private var cachedAt = 0L
 
     fun allowed(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
@@ -22,12 +22,16 @@ object Contacts {
         return out.toList()
     }
 
-    /** Normalized names for [Engine.decide], re-read at most every 10 minutes. */
+    /**
+     * Normalized names for [Engine.decide], re-read at most every 10 minutes on a background thread: reading thousands
+     * of contacts on the main thread froze the app for a moment. Until the first read ends it answers with the last copy.
+     */
     fun names(ctx: Context): Set<String> {
         val now = System.currentTimeMillis()
         if (now - cachedAt > 10 * 60_000L) {
-            cache = all(ctx).map { Engine.normalize(it) }.toSet()
             cachedAt = now
+            val app = ctx.applicationContext
+            Thread { runCatching { cache = all(app).map { Engine.normalize(it) }.toSet() }.onFailure { Store.error("ler contatos", it) } }.start()
         }
         return cache
     }

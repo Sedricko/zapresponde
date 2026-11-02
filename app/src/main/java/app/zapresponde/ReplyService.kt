@@ -10,6 +10,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,7 +23,8 @@ import kotlinx.serialization.encodeToString
 import java.time.LocalDateTime
 
 class ReplyService : NotificationListenerService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    // An error in a background task is recorded instead of closing the app.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e -> Store.error("tarefa em segundo plano", e) })
     private val pending = HashMap<String, Job>()
     private val seen = ArrayDeque<String>()
 
@@ -33,7 +35,7 @@ class ReplyService : NotificationListenerService() {
     private var nextId = 1
     /** Latest Reply button of each chat: the only way to send the Acompanhamento later. Lost if the app is restarted. */
     private class Last(val msg: Incoming, val action: Notification.Action, val pkg: String, val open: android.app.PendingIntent?)
-    private val lastReply = HashMap<String, Last>()
+    private val lastReply = LinkedHashMap<String, Last>()
     private var followJob: Job? = null
 
     override fun onCreate() {
@@ -51,7 +53,16 @@ class ReplyService : NotificationListenerService() {
     override fun onListenerConnected() {
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
-        if (followJob?.isActive != true) followJob = scope.launch { while (true) { delay(60_000); followCheck(); waitCheck(); problemCheck(); cleanCheck() } }
+        if (followJob?.isActive != true) followJob = scope.launch {
+            while (true) {
+                delay(60_000)
+                // One failing step must not stop the others, nor the loop (it used to end for good on the first error).
+                runCatching { followCheck() }.onFailure { Store.error("acompanhamento", it) }
+                runCatching { waitCheck() }.onFailure { Store.error("aviso de carga", it) }
+                runCatching { problemCheck() }.onFailure { Store.error("alerta de problema", it) }
+                runCatching { cleanCheck() }.onFailure { Store.error("limpeza automática", it) }
+            }
+        }
     }
 
     /** "Limpar dados automaticamente", once a day. */
@@ -65,12 +76,15 @@ class ReplyService : NotificationListenerService() {
     private val alerted = HashSet<String>()
 
     /** Automatic alert: the diagnostic's grave problems, as soon as they happen. */
-    private fun problemCheck() {
+    private suspend fun problemCheck() {
         val cfg = Store.config
         if (!cfg.problemAlertOn) return
-        val grave = Problems.find(
-            cfg, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt, approvals.size, System.currentTimeMillis(),
-        ).filter { it.level == 0 && alerted.add(it.title.substringBefore(" recebeu").substringBefore(" respostas")) }
+        val pendingApprovals = approvals.size
+        val grave = withContext(Dispatchers.Default) {
+            synchronized(Store) {
+                Problems.find(cfg, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt, pendingApprovals, System.currentTimeMillis())
+            }
+        }.filter { it.level == 0 && alerted.add(it.title.substringBefore(" recebeu").substringBefore(" respostas")) }
         val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
             android.app.PendingIntent.getActivity(this, 7, it, android.app.PendingIntent.FLAG_IMMUTABLE)
         }
@@ -162,6 +176,11 @@ class ReplyService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName !in APPS) return
+        // Any unexpected error with one message is recorded; before, it closed the whole app.
+        try { posted(sbn) } catch (e: Exception) { Store.error("mensagem recebida", e) }
+    }
+
+    private fun posted(sbn: StatusBarNotification) {
         Health.mark(this, "notifAt")
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
@@ -180,7 +199,11 @@ class ReplyService : NotificationListenerService() {
             return
         }
 
-        if (!msg.isGroup) lastReply[msg.chat] = Last(msg, action, sbn.packageName, n.contentIntent)
+        if (!msg.isGroup) {
+            lastReply.remove(msg.chat); lastReply[msg.chat] = Last(msg, action, sbn.packageName, n.contentIntent)
+            // Each entry holds a WhatsApp button; keep the 300 most recent chats, not every chat ever seen.
+            if (lastReply.size > 300) lastReply.remove(lastReply.keys.first())
+        }
         // WhatsApp re-posts the same notification with the whole history; handle each message once.
         val key = "${msg.chat}|${msg.text}|${lastMessageTime(n)}"
         if (key in seen) return
@@ -291,6 +314,10 @@ class ReplyService : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification, rankingMap: RankingMap, reason: Int) {
+        try { removed(sbn, reason) } catch (e: Exception) { Store.error("notificação apagada", e) }
+    }
+
+    private fun removed(sbn: StatusBarNotification, reason: Int) {
         val cfg = Store.config
         // Only real chats: WhatsApp's own notices ("Procurando novas mensagens") have no Reply button.
         if (!cfg.takeoverOn || sbn.packageName !in APPS || replyAction(sbn.notification) == null) return

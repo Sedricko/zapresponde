@@ -454,4 +454,22 @@ class EngineTest {
         assertEquals("Mensagem é uma resposta nossa", run(msg(echo, sender = "Você"), listOf(rule), cfg, state = st, consulta = sheet).reason)
         assertFalse(Engine.isEcho(st, "ok"))
     }
+
+    @Test fun revisao() {
+        // "Exceto" works on whole words, like the keywords: "oi" no longer blocks "dois".
+        val r = Rule(match = Match.ALL, exclude = "oi", replies = listOf("x"))
+        assertTrue(Engine.matches(r, "quero dois fretes"))
+        assertFalse(Engine.matches(r, "oi tudo bem"))
+        // Internal errors and crashes show up as problems.
+        val now = 10 * 3_600_000L
+        val ev = listOf(
+            LogEntry(now - 60_000, "(erro interno)", "O app fechou por erro", "NullPointerException: x", listOf("at a.b(c.kt:1)")),
+            LogEntry(now - 120_000, "(erro interno)", "aviso de carga", "IllegalStateException: y"),
+            LogEntry(now - 180_000, "(erro interno)", "aviso de carga", "IllegalStateException: y"),
+        )
+        val p = Problems.find(Config(), ev, emptyList(), State(), emptyList(), "", now, 0, now)
+        assertEquals("O app fechou por erro 1 vez(es)", p.first().title)
+        assertTrue(p.any { it.title == "Erro interno em aviso de carga: 2 vez(es)" && it.level == 1 })
+        assertTrue(Problems.summary(ev, emptyList(), now)[0].startsWith("ℹ️ Mensagens recebidas: 0"))
+    }
 }

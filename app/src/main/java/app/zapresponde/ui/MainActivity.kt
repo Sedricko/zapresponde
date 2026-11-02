@@ -838,8 +838,8 @@ fun CleanScreen() {
         fun n(l: List<String>) = l.count { who == null || it == who }
         SwitchRow("Histórico de respostas", history, "${n(Store.history.map { it.chat })} respostas · aba Histórico e números da Início") { history = it }
         SwitchRow("Registro do Diagnóstico", events, "${n(Store.events.map { it.chat })} mensagens · motivos e problemas") { events = it }
-        SwitchRow("Estado das conversas", chats, "${n(Store.state.chats.keys.toList())} conversas · pausas, boas-vindas, regras \"uma vez\", link do grupo e carga já enviados") { chats = it }
-        SwitchRow("Pedidos esperando carga", waiting, "${n(Store.state.waiting.map { it.chat })} pedidos") { waiting = it }
+        SwitchRow("Estado das conversas", chats, "${n(synchronized(Store) { Store.state.chats.keys.toList() })} conversas · pausas, boas-vindas, regras \"uma vez\", link do grupo e carga já enviados") { chats = it }
+        SwitchRow("Pedidos esperando carga", waiting, "${n(synchronized(Store) { Store.state.waiting.map { it.chat } })} pedidos") { waiting = it }
         Button({ confirm = true }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = history || events || chats || waiting) {
             Icon(Icons.Default.Delete, null); Spacer(Modifier.width(6.dp)); Text(if (who == null) "Limpar de todas as conversas" else "Limpar só de $who")
         }
@@ -991,7 +991,8 @@ fun TakeoverScreen() {
         Hint("Quando você toca na notificação ou escreve na conversa, o robô para de responder naquela conversa.")
     }
     var tick by remember { mutableStateOf(0) }
-    val paused = Store.state.chats.filter { tick >= 0 && it.value.pauseUntil > System.currentTimeMillis() }
+    // A copy under the lock: the reply service changes the chats while this screen reads them.
+    val paused = synchronized(Store) { Store.state.chats.filter { tick >= 0 && it.value.pauseUntil > System.currentTimeMillis() }.toMap() }
     if (paused.isNotEmpty()) Panel("Pausadas agora") {
         paused.forEach { (chat, st) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1474,10 +1475,12 @@ fun HelpScreen(open: (String) -> Unit) {
     }
 }
 
-private fun currentProblems() = Problems.find(
-    Store.config, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt,
-    ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
-)
+private fun currentProblems() = synchronized(Store) {
+    Problems.find(
+        Store.config, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt,
+        ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
+    )
+}
 
 /** One problem: what happened, why, and a button that fixes it when one tap can. */
 @Composable
