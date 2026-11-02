@@ -110,6 +110,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import app.zapresponde.AiConfig
 import app.zapresponde.Assistant
 import app.zapresponde.Audience
 import app.zapresponde.Config
