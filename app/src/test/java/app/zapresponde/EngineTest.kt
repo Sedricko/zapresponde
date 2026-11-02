@@ -498,4 +498,29 @@ class EngineTest {
             Engine.keepLoads(s, s)
         }
     }
+
+    @Test fun funcionamentoInterno() {
+        val now = 30 * 24 * 3_600_000L
+        // All fine: every part says so instead of staying empty.
+        val ok = Problems.internal(Config(), listOf(Rule(name = "Oi", match = Match.CONTAINS, keywords = "oi", replies = listOf("olá"))), emptyList(),
+            listOf(HistoryEntry(now - 1000, "WhatsApp", "Ana", false, "oi", "olá", "Oi")), now)
+        assertTrue(ok.toString(), ok.contains("  ✅ Nenhum erro interno e nenhum travamento") && ok.contains("  ✅ Nenhum conflito entre as 1 regras ativas") && ok.contains("  ✅ Nenhum conflito de configuração"))
+        // Problems of every part.
+        val rules = listOf(
+            Rule(name = "Tudo", match = Match.ALL, replies = listOf("x")),
+            Rule(name = "Preço", match = Match.CONTAINS, keywords = "preço, valor", replies = listOf("y")),
+            Rule(name = "Valor", match = Match.CONTAINS, keywords = "valor", replies = listOf("")),
+        )
+        val ev = listOf(
+            LogEntry(now - 1000, "(erro interno)", "O app fechou por erro", "NullPointerException: x"),
+            LogEntry(now - 2000, "(erro interno)", "ler contatos", "SecurityException: y"),
+        )
+        val cfg = Config(contactsOn = true, contactsMode = Audience.LIST, contactsList = "", scheduleOn = true, scheduleHours = "8h às 18h")
+        val bad = Problems.internal(cfg, rules, ev, emptyList(), now).joinToString("\n")
+        for (want in listOf(
+            "❌ O app fechou por erro 1 vez(es)", "⚠️ ler contatos: 1 erro(s)", "❌ Preço nunca responde: \"Tudo\"",
+            "⚠️ \"valor\" está em \"Preço\" e em \"Valor\"", "❌ Valor: A regra não tem resposta.", "ℹ️ Tudo não respondeu nada",
+            "❌ Contatos em \"Só a minha lista\" com a lista vazia", "❌ Agenda ligada com horário \"8h às 18h\"",
+        )) assertTrue(want + "\n" + bad, bad.contains(want))
+    }
 }

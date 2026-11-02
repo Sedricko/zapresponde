@@ -139,6 +139,62 @@ object Problems {
         return out.sortedBy { it.level }
     }
 
+    /**
+     * "Funcionamento interno": the app's own errors (7 days), conflicts between rules and between settings. Always shown,
+     * with ✅ lines when a part is fine, so an empty section never hides that it was checked.
+     */
+    fun internal(cfg: Config, rules: List<Rule>, events: List<LogEntry>, history: List<HistoryEntry>, now: Long): List<String> {
+        val out = mutableListOf<String>()
+        val week = events.filter { it.chat == "(erro interno)" && now - it.time < 7 * 24 * 60 * MIN }
+
+        out += "Erros internos (7 dias)"
+        val crashes = week.filter { it.text == "O app fechou por erro" }
+        if (week.isEmpty()) out += "  ✅ Nenhum erro interno e nenhum travamento"
+        if (crashes.isNotEmpty()) out += "  ❌ O app fechou por erro ${crashes.size} vez(es); último: ${crashes.first().result}"
+        week.filter { it.text != "O app fechou por erro" }.groupBy { it.text }.forEach { (where, l) ->
+            out += "  ⚠️ $where: ${l.size} erro(s); último: ${l.first().result}"
+        }
+
+        out += "Conflitos entre regras"
+        val active = rules.filter { it.enabled }
+        val ruleIssues = mutableListOf<String>()
+        active.forEach { r -> Assistant.problems(r).forEach { ruleIssues += "  ❌ ${r.name}: $it" } }
+        // A rule that takes every message, at any time, for anyone, hides every rule under it.
+        active.forEachIndexed { i, r ->
+            val catchAll = r.match == Match.ALL && r.exclude.isBlank() && r.hours.isBlank() && r.days.size == 7 && r.who == Who.ALL && r.freq == Freq.ALWAYS
+            if (catchAll) active.drop(i + 1).forEach { below -> ruleIssues += "  ❌ ${below.name} nunca responde: \"${r.name}\" (qualquer mensagem) está acima dela" }
+        }
+        // The same keyword in two rules: only the first one answers it.
+        val seen = mutableMapOf<String, String>()
+        active.filter { it.match == Match.CONTAINS || it.match == Match.EXACT }.forEach { r ->
+            Engine.splitList(r.keywords).map { Engine.normalize(it) }.distinct().forEach { k ->
+                val first = seen.putIfAbsent(k, r.name)
+                if (first != null && first != r.name) ruleIssues += "  ⚠️ \"$k\" está em \"$first\" e em \"${r.name}\": só \"$first\" responde"
+            }
+        }
+        val fired = history.filter { now - it.time < 7 * 24 * 60 * MIN }.map { it.rule }
+        active.filter { r -> fired.none { it == r.name || it.contains(r.name) } }.forEach { ruleIssues += "  ℹ️ ${it.name} não respondeu nada nos últimos 7 dias" }
+        out += ruleIssues.ifEmpty { listOf("  ✅ Nenhum conflito entre as ${active.size} regras ativas") }
+
+        out += "Conflitos de configuração"
+        val cfgIssues = mutableListOf<String>()
+        if (cfg.contactsOn && cfg.contactsMode == Audience.LIST && cfg.contactsList.isBlank())
+            cfgIssues += "  ❌ Contatos em \"Só a minha lista\" com a lista vazia: o app não responde ninguém"
+        if (cfg.scheduleOn && (cfg.scheduleDays.isEmpty() || !Regex("""^\s*\d{1,2}(:\d{2})?\s*-\s*\d{1,2}(:\d{2})?\s*(,\s*\d{1,2}(:\d{2})?\s*-\s*\d{1,2}(:\d{2})?\s*)*$""").matches(cfg.scheduleHours)))
+            cfgIssues += "  ❌ Agenda ligada com horário \"${cfg.scheduleHours}\" ou dias inválidos: pode nunca abrir"
+        if (cfg.contactsOn && !cfg.groupsOn && active.any { it.groups != Groups.NONE })
+            cfgIssues += "  ⚠️ Há regras para grupos, mas os grupos estão desligados em Contatos"
+        if (cfg.approvalOn && cfg.waitOn && cfg.waitMode == WaitMode.AUTO)
+            cfgIssues += "  ℹ️ \"Avisar quando a carga aparecer\" está em Enviar sozinho, mas \"Aprovar antes de enviar\" está ligado (as respostas comuns pedem aprovação; a carga que apareceu não)"
+        if (cfg.followOn && cfg.followMin > 360) cfgIssues += "  ⚠️ Link do grupo depois de ${cfg.followMin} min: tempos longos se perdem se o celular reiniciar"
+        if (cfg.headerFooterOn && cfg.header.isBlank() && cfg.footer.isBlank()) cfgIssues += "  ⚠️ Cabeçalho e rodapé ligado, mas os dois estão vazios"
+        if (cfg.formOn && cfg.formQuestions.isBlank()) cfgIssues += "  ⚠️ Pedido pela conversa ligado sem perguntas"
+        if (cfg.delayOn && maxOf(cfg.delayMinSec, cfg.delayMaxSec) > 120) cfgIssues += "  ⚠️ Atraso humano de até ${maxOf(cfg.delayMinSec, cfg.delayMaxSec)} s: uma mensagem nova nesse meio-tempo cancela a resposta"
+        if (cfg.sheetOn && cfg.sheetUrl.isBlank()) cfgIssues += "  ❌ Planilha ligada sem link"
+        out += cfgIssues.ifEmpty { listOf("  ✅ Nenhum conflito de configuração") }
+        return out
+    }
+
     /** Last 24 h in numbers: received, answered, ignored by reason, and the kinds of replies. */
     fun summary(events: List<LogEntry>, history: List<HistoryEntry>, now: Long): List<String> {
         val day = events.filter { now - it.time < 24 * 60 * MIN && it.chat != "(sistema)" && it.chat != "(erro interno)" && it.text.isNotEmpty() }

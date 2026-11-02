@@ -133,7 +133,8 @@ object Assistant {
             2) se a decisão do app foi correta ou não;
             3) o que mudar, apontando o botão ou a regra exata em Ajustes. Se parecer defeito do app, diga "possível defeito do app" e descreva.
             O relatório já começa com "Problemas encontrados", detectados pelo próprio app: comece por eles, confirme ou corrija cada um,
-            e só depois aponte o que mais você notar. Seja direto: diga o que está errado e o que fazer, sem rodeios.
+            e só depois aponte o que mais você notar. Leia também a seção "Funcionamento interno" (erros do próprio app, conflitos
+            entre regras e de configuração, saúde do serviço): erro interno ou travamento é sempre o primeiro assunto. Seja direto: diga o que está errado e o que fazer, sem rodeios.
             Não invente: use só o que está abaixo.
         """.trimIndent())
         if (question.isNotBlank()) append("\n\nPergunta do dono: ").append(question.trim())

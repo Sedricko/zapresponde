@@ -1395,6 +1395,7 @@ fun HelpScreen(open: (String) -> Unit) {
     val c = Store.config
     var report by remember { mutableStateOf("") }
     var problems by remember { mutableStateOf<List<Problem>?>(null) }
+    var internal by remember { mutableStateOf<List<String>>(emptyList()) }
     var question by rememberSaveable { mutableStateOf("") }
     var answer by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -1405,6 +1406,7 @@ fun HelpScreen(open: (String) -> Unit) {
         scope.launch {
             report = withContext(Dispatchers.IO) { diagnose(ctx) }
             problems = currentProblems()
+            internal = withContext(Dispatchers.IO) { internalLines(ctx) }
             if (withAi) {
                 answer = "A IA está analisando o relatório..."
                 answer = runCatching {
@@ -1434,6 +1436,13 @@ fun HelpScreen(open: (String) -> Unit) {
                 if (i > 0) Divider()
                 ProblemItem(pr, open)
             }
+        }
+    }
+    if (internal.isNotEmpty()) Panel("Funcionamento interno") {
+        internal.forEach { line ->
+            val title = !line.startsWith(" ")
+            Text(line.trim(), style = if (title) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodySmall,
+                fontWeight = if (title) FontWeight.Bold else null, modifier = Modifier.padding(top = if (title) 10.dp else 2.dp))
         }
     }
     if (answer.isNotEmpty()) Panel("Análise da IA") {
@@ -1470,6 +1479,32 @@ fun HelpScreen(open: (String) -> Unit) {
                 "• Se nada resolver, desligue e ligue o acesso às notificações ou reinicie o celular.",
         )
     }
+}
+
+/** "Funcionamento interno": errors, rule and setting conflicts (Problems.internal) plus the service's health and versions. */
+private fun internalLines(ctx: android.content.Context): List<String> {
+    val now = System.currentTimeMillis()
+    val out = synchronized(Store) { Problems.internal(Store.config, Store.allRules(), Store.events, Store.history, now) }.toMutableList()
+    val day = Store.events.filter { now - it.time < 24 * 3_600_000L }
+    fun version(pkg: String) = runCatching { ctx.packageManager.getPackageInfo(pkg, 0).versionName }.getOrNull() ?: "não instalado"
+    val disconnects = day.count { it.result.startsWith("Android desconectou") }
+    val lost = day.count { it.result.contains("perdeu o botão Responder") }
+    val box = Store.outbox
+    val queued = box.historico.size + box.pedidos.size + box.leads.size
+    out += "Saúde do serviço (24 h)"
+    out += "  ${if (disconnects == 0) "✅" else "⚠️"} O Android desligou o serviço $disconnects vez(es)"
+    out += "  ${if (lost == 0) "✅" else "⚠️"} Envios perdidos por reinício do app (botão Responder esquecido): $lost"
+    out += "  ${if (queued == 0) "✅" else "⚠️"} Fila para a planilha: $queued linha(s) esperando" +
+        if (queued > 0) " (Historico ${box.historico.size}, Pedidos ${box.pedidos.size}, Leads ${box.leads.size})" else ""
+    out += if (Store.sheet.syncedAt == 0L) "  ⚠️ A planilha nunca foi lida" else
+        "  ${if (Store.sheet.error.isEmpty()) "✅" else "⚠️"} Última leitura da planilha: ${fmt(Store.sheet.syncedAt)}" +
+            if (Store.sheet.error.isNotEmpty()) " · último erro: ${Store.sheet.error.take(120)}" else ""
+    out += "  ℹ️ Guardado no celular: ${Store.history.size} respostas, ${Store.events.size} registros, ${Store.state.chats.size} conversas, ${Store.state.waiting.size} pedidos esperando"
+    out += "  ℹ️ Na memória agora: ${ReplyService.instance?.approvalsPending() ?: 0} aprovação(ões) pendente(s)"
+    out += "Versões"
+    out += "  ℹ️ App ${version(ctx.packageName)} · script da planilha ${Sheets.scriptVersion.ifEmpty { "?" }} · Android ${android.os.Build.VERSION.RELEASE}"
+    out += "  ℹ️ WhatsApp ${version("com.whatsapp")} · WhatsApp Business ${version("com.whatsapp.w4b")}"
+    return out
 }
 
 private fun currentProblems() = synchronized(Store) {
@@ -1596,6 +1631,9 @@ private fun diagnose(ctx: android.content.Context): String {
     }
     top += "— Últimas 24 h"
     top += Problems.summary(Store.events, Store.history, now)
+    top += ""
+    top += "— Funcionamento interno"
+    top += internalLines(ctx)
     top += ""
     l.addAll(2, top)
     return l.joinToString("\n")
