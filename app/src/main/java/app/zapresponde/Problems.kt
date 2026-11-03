@@ -72,10 +72,12 @@ object Problems {
 
         // Looks like a freight request but nothing answered it.
         val cityWords = Regex("""\b(para|pra|carga|cargas|frete|fretes)\b""")
-        // Only messages naming a city of the sheet: "Descarga é para que dia?" is a question about a load, not a request.
+        // The same test the app answers with: only what it would take as a request ("Goiânia para Anápolis") and left
+        // unanswered counts. "Bom dia, vou passar documentos para a carga de Navegantes" is news, not a request.
         day.filter {
             it.result.startsWith("Nenhuma regra") && cityWords.containsMatchIn(Engine.normalize(it.text)) &&
-                !Regex("origem:|lista de cargas").containsMatchIn(Engine.normalize(it.text)) && Engine.mentionsSheetCity(it.text, sheet)
+                Engine.freteBlocked(it.text, cfg.freteBlock) == null &&
+                (Engine.freteRoute(it.text) != null || Engine.freteLivre(it.text, sheet) != null)
         }.take(5).forEach { e ->
             val why = e.trace.lastOrNull { "Frete" in it || "frete" in it }?.trim().orEmpty()
             out += Problem(

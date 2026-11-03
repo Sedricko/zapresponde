@@ -382,12 +382,6 @@ object Engine {
      * Sheet cities named in the message, in order. Each entry holds every city that fits at that spot
      * (the same name can exist in two states); a UF written right after it narrows the choice.
      */
-    /** Whether the message names any city of the freight sheet (for the diagnostic's "request without answer"). */
-    fun mentionsSheetCity(text: String, rows: List<List<String>>): Boolean {
-        val cities = rows.mapNotNull { rowPlaces(it) }.flatMap { p -> listOf(City(words(p[0]), p[1]), City(words(p[2]), p[3])) }.toSet()
-        return citiesIn(text, cities).isNotEmpty()
-    }
-
     private fun citiesIn(text: String, cities: Collection<City>): List<List<City>> {
         val t = words(text)
         val byLength = cities.sortedByDescending { it.words.size }

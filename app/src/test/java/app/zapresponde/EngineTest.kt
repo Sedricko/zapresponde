@@ -398,6 +398,7 @@ class EngineTest {
             LogEntry(now - 4 * min, "Johon", "Que droga", "Nenhuma regra serviu"),
             LogEntry(now - 5 * min, "Ana", "tem carga pra Cuiabá?", "Nenhuma regra serviu", listOf("ℹ️ Frete escrito: não é pedido de frete")),
             LogEntry(now - 7 * min, "Bia", "Descarga é para que dia ?", "Nenhuma regra serviu"),
+            LogEntry(now - 8 * min, "Caio", "Bom dia, vou passar documentos para a carga de Cuiabá", "Nenhuma regra serviu"),
         )
         val sheet = listOf(listOf("x", ""), listOf("Louveira/SP para Cuiabá/MT", "carga"))
         val hist = listOf(HistoryEntry(now - 6 * min, "WhatsApp", "Johon", false, "oi", "❌ *FRETE INDISPONÍVEL*", "Fretes", listOf("✅ passo")))
@@ -406,12 +407,12 @@ class EngineTest {
         val titles = p.map { it.title }
         assertTrue(titles.toString(), p.first().level == 0 && p.first().fix == "exclude:Frete Bras - Publicações")
         assertTrue(titles.toString(), titles.any { it.startsWith("Johon respondeu \"Que droga\"") })
-        assertTrue(titles.toString(), titles.any { "tem carga pra Cuiabá?" in it } && titles.none { "Descarga" in it })
+        assertTrue(titles.toString(), titles.any { "tem carga pra Cuiabá?" in it } && titles.none { "Descarga" in it || "documentos" in it })
         assertTrue(titles.toString(), titles.any { it.startsWith("Link do grupo ligado sem link") })
         // Already in the exceptions: no longer a problem.
         val cfg2 = cfg.copy(contactsOn = true, contactsMode = Audience.EXCEPT_LIST, contactsList = "Frete Bras - Publicações", followLink = "x")
         assertTrue(Problems.find(cfg2, ev, hist, State(), emptyList(), "", now, 0, now).none { it.fix?.startsWith("exclude:") == true })
-        assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 6 · respondidas: 3 · sem resposta: 3"))
+        assertTrue(Problems.summary(ev, hist, now)[0].startsWith("ℹ️ Mensagens recebidas: 7 · respondidas: 3 · sem resposta: 4"))
     }
 
     @Test fun novidadeNaoEPedido() {
