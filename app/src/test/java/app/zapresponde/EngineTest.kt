@@ -542,4 +542,18 @@ class EngineTest {
             "❌ Contatos em \"Só a minha lista\" com a lista vazia", "❌ Agenda ligada com horário \"8h às 18h\"",
         )) assertTrue(want + "\n" + bad, bad.contains(want))
     }
+
+    @Test fun autoteste() {
+        val sheet = listOf(listOf("🟢 ONLINE", ""), listOf("Goiânia/GO para Anápolis/GO", "✨ 🚛 *FRETE DISPONÍVEL*\n🏭 *ORIGEM:* GOIÂNIA/GO\n📍 *DESTINO:* ANÁPOLIS/GO\n• Coleta: Ter 20/10 08:00"))
+        val rules = listOf(Rule(name = "Comando - Lista", match = Match.EXACT, keywords = "Lista", replies = listOf("lista")))
+        val cfg = Config(freteOn = true, freteLivreOn = true, contactsOn = true, contactsMode = Audience.EXCEPT_LIST, contactsList = "Frete Bras - Publicações")
+        val st = State()
+        val out = Problems.selfTest(cfg, rules, sheet, st, monday10, "0.9.3")
+        assertTrue(out.joinToString("\n"), out.none { it.startsWith("❌") } && out.count { it.startsWith("✅") } >= 7)
+        // A rule hidden under a catch-all is caught.
+        val hidden = Problems.selfTest(Config(), listOf(Rule(name = "Tudo", match = Match.ALL, replies = listOf("x"))) + rules, emptyList(), State(), monday10, "")
+        assertTrue(hidden.toString(), hidden.any { it.startsWith("❌ Regra \"Comando - Lista\" não respondeu") })
+        // The real state is untouched when a copy is passed (the screen passes Store.stateCopy()).
+        assertTrue(State().chats.isEmpty())
+    }
 }

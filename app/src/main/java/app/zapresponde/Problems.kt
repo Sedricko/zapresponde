@@ -197,6 +197,59 @@ object Problems {
         return out
     }
 
+    /**
+     * "Autoteste": the main features run against the real settings, rules and freight sheet, on a copy of the state,
+     * nothing sent. Each line is ✅ (worked), ❌ (did not) or ℹ️ (skipped, and why).
+     */
+    fun selfTest(cfg: Config, rules: List<Rule>, sheet: List<List<String>>, state: State, now: java.time.LocalDateTime, scriptVersion: String): List<String> {
+        val out = mutableListOf<String>()
+        // Same settings without the things that depend on the clock or on delays; replies are never sent from here.
+        val c = cfg.copy(enabled = true, scheduleOn = false, delayOn = false, contactsOn = false)
+        var t = 0L
+        fun ask(text: String, who: String = "Autoteste") = Engine.decide(Incoming(who, who, text, false), now, 1_000_000_000L + (t++) * 61_000L, c, rules, sheet, state)
+        fun check(ok: Boolean, yes: String, no: String) { out += if (ok) "✅ $yes" else "❌ $no" }
+
+        out += if (scriptVersion.isEmpty()) "ℹ️ Script da planilha: versão ainda não lida (rode o diagnóstico com a planilha ligada)"
+        else if (scriptVersion == "0.9.3") "✅ Script da planilha na versão atual ($scriptVersion)" else "⚠️ Script da planilha na versão $scriptVersion; a atual é 0.9.3"
+
+        val route = sheet.map { it.firstOrNull().orEmpty().trim() }.firstOrNull { r ->
+            Regex("(?i)^[^/]+/\\w\\w para [^/]+/\\w\\w$").matches(r) && sheet.first { it.firstOrNull()?.trim() == r }.let { row -> !Engine.closed(row.drop(1).maxByOrNull { it.length }.orEmpty()) }
+        }
+        if (!c.freteOn) out += "ℹ️ Fretes: Respostas de frete está desligado; testes de frete pulados"
+        else if (route == null) out += "❌ Fretes: nenhuma carga ativa na planilha para testar"
+        else {
+            val ad = ask("Olá, sou Autoteste e estou disponível para carregar seu frete de $route de TESTE.")
+            check(ad.replies.isNotEmpty() && ad.rule.startsWith("Fretes"), "Anúncio do FreteBras ($route): carga respondida", "Anúncio do FreteBras ($route) não foi respondido: ${ad.reason}")
+            val sent = ad.replies.firstOrNull()
+            if (sent != null) {
+                val echo = ask(sent.replace("*", ""), "Autoteste eco")
+                check(echo.reason == "Mensagem é uma resposta nossa", "Eco da carga enviada reconhecido (não responde a si mesmo)", "Eco da carga NÃO reconhecido: ${echo.reason}")
+                val again = ask("$route ainda disponível?")
+                check(again.replies.firstOrNull() != sent, "Mesma carga pedida de novo: não repetiu a mensagem inteira", "Mesma carga pedida de novo: mandou a mensagem inteira outra vez")
+            }
+            val (from, to) = route.split(Regex("(?i) para ")).map { it.substringBefore("/") }
+            if (c.freteLivreOn) {
+                val free = ask("$from para $to", "Autoteste 2")
+                check(free.replies.isNotEmpty(), "Pedido escrito \"$from para $to\": respondido", "Pedido escrito \"$from para $to\" não foi respondido: ${free.reason}")
+                val news = ask("Fechei uma carga com outra empresa para $to ontem", "Autoteste 3")
+                check(news.replies.isEmpty(), "Frase de novidade (\"Fechei uma carga...\") não foi tratada como pedido", "Frase de novidade foi respondida como pedido")
+            } else out += "ℹ️ Pedido escrito de qualquer jeito desligado; teste pulado"
+        }
+
+        // Each active rule answers its own first keyword, in the real order (another rule above may take it first).
+        rules.filter { it.enabled && (it.match == Match.CONTAINS || it.match == Match.EXACT || it.match == Match.STARTS) }.forEach { r ->
+            val k = Engine.splitList(r.keywords).firstOrNull() ?: return@forEach
+            val d = ask(k, "Autoteste regra ${r.name}")
+            check(d.rule.contains(r.name), "Regra \"${r.name}\" responde \"$k\"", "Regra \"${r.name}\" não respondeu \"$k\": " + (if (d.rule.isNotEmpty()) "respondeu \"${d.rule}\" antes" else d.reason))
+        }
+
+        if (cfg.contactsOn && cfg.contactsMode == Audience.EXCEPT_LIST) cfg.contactsList.lines().firstOrNull { it.isNotBlank() }?.let { name ->
+            val d = Engine.decide(Incoming(name.trim(), name.trim(), "oi", false), now, 2_000_000_000L, cfg.copy(scheduleOn = false), rules, sheet, state)
+            check(d.replies.isEmpty(), "Filtro de contatos: \"${name.trim()}\" (exceção) não recebe resposta", "Filtro de contatos: \"${name.trim()}\" está nas exceções mas recebeu resposta")
+        }
+        return out
+    }
+
     /** Last 24 h in numbers: received, answered, ignored by reason, and the kinds of replies. */
     fun summary(events: List<LogEntry>, history: List<HistoryEntry>, now: Long): List<String> {
         val day = events.filter { now - it.time < 24 * 60 * MIN && it.chat != "(sistema)" && it.chat != "(erro interno)" && it.text.isNotEmpty() }

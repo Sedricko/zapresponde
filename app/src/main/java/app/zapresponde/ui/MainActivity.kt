@@ -135,6 +135,9 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import app.zapresponde.Store
 import app.zapresponde.WaitMode
 import app.zapresponde.Who
@@ -1431,11 +1434,35 @@ fun HelpScreen(open: (String) -> Unit) {
     fun share(text: String, title: String) =
         ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), title))
 
-    Panel("Diagnóstico completo") {
+    var selfTest by remember { mutableStateOf<List<String>>(emptyList()) }
+    val clipboard = LocalClipboardManager.current
+    fun everything() = listOfNotNull(
+        answer.takeIf { it.isNotEmpty() && !it.startsWith("❌") }?.let { "ANÁLISE DA IA\n\n$it" },
+        selfTest.takeIf { it.isNotEmpty() }?.let { "AUTOTESTE\n" + it.joinToString("\n") },
+        report.takeIf { it.isNotEmpty() && it != "Testando..." },
+    ).joinToString("\n\n")
+    Panel("Relatório e testes") {
         if (withAi) Field("Pergunta para a IA (opcional)", question, help = "Ex.: por que respondeu várias vezes para o Meu?", maxLines = 3) { question = it }
         Button({ run() }, Modifier.fillMaxWidth(), enabled = !busy) {
             Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp))
             Text(if (withAi) "Rodar diagnóstico e análise da IA" else "Rodar diagnóstico completo")
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton({ share(everything(), "Enviar relatório") }, Modifier.weight(1f), enabled = !busy && everything().isNotEmpty()) { Text("Compartilhar") }
+            OutlinedButton({ clipboard.setText(AnnotatedString(everything())) }, Modifier.weight(1f), enabled = !busy && everything().isNotEmpty()) { Text("Copiar tudo") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Runs the main features on a copy of the state, with the real settings, rules and sheet; nothing is sent.
+            OutlinedButton({
+                selfTest = listOf("Testando...")
+                scope.launch {
+                    selfTest = withContext(Dispatchers.Default) {
+                        runCatching { Problems.selfTest(Store.config, Store.allRules(), Store.sheet.consulta, Store.stateCopy(), LocalDateTime.now(), Sheets.scriptVersion) }
+                            .getOrElse { listOf("❌ O autoteste falhou: ${it.message}") }
+                    }
+                }
+            }, Modifier.weight(1f), enabled = !busy) { Text("Autoteste") }
+            OutlinedButton({ open("clean") }, Modifier.weight(1f)) { Text("Limpar registro") }
         }
         SwitchRow("Análise pela IA junto", c.aiDiagOn, "O relatório, com o texto das últimas mensagens, vai para o Gemini") { cfg { copy(aiDiagOn = it) } }
         if (c.aiDiagOn && c.aiKey.isBlank()) Hint("Cole a chave do Gemini em Ferramentas > Assistente de IA.")
@@ -1471,12 +1498,11 @@ fun HelpScreen(open: (String) -> Unit) {
         }
         if (!c.aiOn || c.aiKey.isBlank()) Hint("Para corrigir com a IA, ligue o Assistente de IA e cole a chave do Gemini.")
     }
-    if (report.isNotEmpty() && !busy) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton({ share(report, "Enviar relatório") }, Modifier.weight(1f)) { Text("Compartilhar relatório") }
-        if (answer.isNotEmpty() && !answer.startsWith("❌")) Button({ share("ANÁLISE DA IA\n\n$answer\n\n$report", "Enviar análise e relatório") }, Modifier.weight(1f)) {
-            Text("Compartilhar análise + relatório")
-        }
+    if (selfTest.isNotEmpty()) Panel(if (selfTest.any { it.startsWith("❌") }) "Autoteste (${selfTest.count { it.startsWith("❌") }} falha(s))" else "Autoteste") {
+        selfTest.forEach { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+        Hint("Feito com os seus ajustes, regras e planilha, numa cópia das conversas: nada foi enviado. Agenda e atraso ficam de fora do teste.")
     }
+    LogPanel()
     if (report.isNotEmpty()) Panel("Relatório") {
         Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
     }
@@ -1535,6 +1561,48 @@ private fun currentProblems() = synchronized(Store) {
         Store.config, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt,
         ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
     )
+}
+
+/** The live record of every message and event, with filters; tapping a line shows the path of the decision. */
+@Composable
+private fun LogPanel() {
+    var filter by rememberSaveable { mutableStateOf("Tudo") }
+    var shown by remember { mutableStateOf(40) }
+    var open by remember { mutableStateOf(-1L) }
+    val all = Store.events
+    val filters = linkedMapOf<String, (app.zapresponde.LogEntry) -> Boolean>(
+        "Tudo" to { true },
+        "Falhas" to { e -> e.chat == Store.INTERNAL || listOf("Falhou", "não enviado", "não atualizou", "cancelad", "Sem botão").any { it in e.result } },
+        "Respondidas" to { e -> e.result.startsWith("Respondido") || e.result.startsWith("📨") },
+        "Sem resposta" to { e -> e.result.startsWith("Nenhuma regra") || e.result.startsWith("Frete fora") },
+        "Pausas" to { e -> "pausad" in e.result },
+        "Erros internos" to { e -> e.chat == Store.INTERNAL },
+        "Sistema" to { e -> e.chat == "(sistema)" },
+    )
+    val list = remember(all, filter) { all.filter(filters.getValue(filter)) }
+    Panel("Registro (${all.size})") {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            filters.keys.forEach { k -> FilterChip(filter == k, { filter = k; shown = 40 }, { Text(k) }) }
+        }
+        if (list.isEmpty()) Hint("Nada aqui.")
+        list.take(shown).forEach { e ->
+            val mark = when {
+                e.chat == Store.INTERNAL -> "❌"
+                e.result.startsWith("Respondido") || e.result.startsWith("📨") -> "✅"
+                "pausad" in e.result -> "⏸"
+                else -> "·"
+            }
+            Column(Modifier.fillMaxWidth().clickable { open = if (open == e.time) -1 else e.time }.padding(vertical = 4.dp)) {
+                Text("${SimpleDateFormat("dd/MM HH:mm:ss", Locale("pt", "BR")).format(Date(e.time))} $mark ${e.chat}" +
+                    (if (e.text.isNotEmpty()) ": \"${e.text.take(60).replace('\n', ' ')}\"" else "") + " → ${e.result}",
+                    style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                if (open == e.time) e.trace.ifEmpty { listOf("(sem caminho de decisão guardado)") }.forEach {
+                    Text("   $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+        if (list.size > shown) TextButton({ shown += 40 }, Modifier.fillMaxWidth()) { Text("Mostrar mais (${list.size - shown})") }
+    }
 }
 
 /** One problem: what happened, why, and a button that fixes it when one tap can. */
