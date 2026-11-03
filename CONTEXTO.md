@@ -17,7 +17,7 @@ App Android próprio (Kotlin, escrito do zero) que responde ao WhatsApp e ao Wha
 - Repositório: https://github.com/Sedricko/zapresponde (privado, branch `main`). O app do Claude no GitHub tem acesso.
 - APK: cada push roda o GitHub Actions (`.github/workflows`, gradle 8.11.1, Java 17, `gradle testDebugUnitTest assembleDebug`) e gera o artifact **ZapResponde-apk**. Envie ao William o link `https://github.com/Sedricko/zapresponde/actions/runs/<id>`.
 - Assinatura fixa (`app/zapresponde.keystore`, alias e senha `zapresponde`): as atualizações instalam por cima.
-- O ambiente na nuvem bloqueia dl.google.com, maven.google.com, script.google.com e o download de artifacts. Por isso o APK sai pelo CI. Os testes JVM rodam localmente com um projeto gradle à parte, só com Model.kt, Engine.kt e EngineTest.kt.
+- O ambiente na nuvem bloqueia dl.google.com, maven.google.com e script.google.com, então o APK é compilado pelo CI; o download do artifact pelo `gh run download` funciona. Os testes JVM rodam localmente com um projeto gradle à parte, só com Model.kt, Engine.kt e EngineTest.kt.
 - Versão do app: `app/build.gradle.kts` (versionCode e versionName). Suba a cada entrega.
 - Arquivos do projeto em `/mnt/project-files/zapresponde/`: `Codigo.gs` (script atual), `TUTORIAL-ZapResponde-0.9.5.md` (manual do usuário, substitui o guia PDF 0.9.2), `skill-zapresponde/SKILL.md`, `PACOTE-0.9.5.md` e o zip com tudo para abrir em outra IA.
 
@@ -113,4 +113,5 @@ Regras (8 tipos de comparação, variáveis, frequência, horários, contatos e 
 ## Como continuar
 1. Clone o repo, leia este arquivo e o README.
 2. Faça a mudança, rode os testes JVM do Engine, suba versionCode e versionName (e `VERSAO` se mexer no script), faça commit e push, espere o CI ficar verde e mande o link do run.
+   **Sempre envie o APK pronto direto na conversa** (pedido do William em 03/11): `gh run download <id> -R Sedricko/zapresponde -n ZapResponde-apk -D <pasta>`, renomeie para `ZapResponde-<versão>.apk`, confira a versão no AndroidManifest e mande o arquivo (SendUserFile). O download de artifacts funciona neste ambiente.
 3. Se mudar o script: copie para `/mnt/project-files/zapresponde/Codigo.gs` e lembre o William de implantar como Nova versão na planilha **ZapResponde**.
