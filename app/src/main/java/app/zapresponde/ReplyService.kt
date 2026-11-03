@@ -51,6 +51,7 @@ class ReplyService : NotificationListenerService() {
     }
 
     override fun onListenerConnected() {
+        Store.trace("SERVICO", "Serviço de notificações conectado")
         Health.mark(this, "connectedAt")
         Store.log("(sistema)", "", "Serviço de notificações conectado")
         if (followJob?.isActive != true) followJob = scope.launch {
@@ -162,6 +163,7 @@ class ReplyService : NotificationListenerService() {
                 continue
             }
             Store.log(chat, "", "📨 Acompanhamento enviado (link do grupo)")
+            Store.trace("ENVIO", "$chat: link do grupo entregue ao WhatsApp")
             val entry = HistoryEntry(now, APPS[pkg] ?: pkg, chat, false, "", text, "Acompanhamento", kind = "Link do grupo")
             Store.addHistory(entry)
             if (cfg.sheetOn && cfg.sheetLogOn) { Store.queue(historico = Sheets.historyRow(entry)); Sheets.syncNow(this) }
@@ -169,6 +171,7 @@ class ReplyService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        Store.trace("SERVICO", "Android desconectou o serviço; pedindo reconexão")
         Health.mark(this, "disconnectedAt")
         Store.log("(sistema)", "", "Android desconectou o serviço; pedindo reconexão")
         if (Build.VERSION.SDK_INT >= 24) requestRebind(ComponentName(this, ReplyService::class.java))
@@ -186,12 +189,15 @@ class ReplyService : NotificationListenerService() {
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         val action = replyAction(n)
         val msg = parse(sbn) ?: run {
+            Store.trace("NOTIF", "${APPS[sbn.packageName]}: notificação sem título ou texto (categoria ${n.category}) ignorada")
             if (n.category == Notification.CATEGORY_MESSAGE) {
                 Health.count(this, "unreadable")
                 Store.log("(não lida)", "", "Notificação de mensagem sem título ou texto: não deu para ler")
             }
             return
         }
+        Store.trace("NOTIF", "${APPS[sbn.packageName]} · ${msg.chat}${if (msg.isGroup) " (grupo, de ${msg.sender})" else ""}" +
+            "${if (msg.fromMe) " · mensagem sua" else ""}${if (action == null) " · SEM botão Responder" else ""}: \"${msg.text.take(80).replace('\n', ' ')}\"")
         if (action != null) Health.mark(this, "replyNotifAt")
         if (action == null) {
             // A real message without Reply is worth seeing in the diagnostic; WhatsApp's own notices are noise.
@@ -206,7 +212,7 @@ class ReplyService : NotificationListenerService() {
         }
         // WhatsApp re-posts the same notification with the whole history; handle each message once.
         val key = "${msg.chat}|${msg.text}|${lastMessageTime(n)}"
-        if (key in seen) return
+        if (key in seen) { Store.trace("NOTIF", "${msg.chat}: mesma notificação repetida, ignorada"); return }
         seen.addLast(key); if (seen.size > 200) seen.removeFirst()
 
         val cfg = Store.config
@@ -237,6 +243,7 @@ class ReplyService : NotificationListenerService() {
     private fun answer(msg: Incoming, action: Notification.Action, sbn: StatusBarNotification) {
         val cfg = Store.config
         val before = synchronized(Store) { Store.state.chats[msg.chat]?.let(::copyOf) }
+        val started = System.nanoTime()
         val d = synchronized(Store) {
             Engine.decide(
                 msg, LocalDateTime.now(), System.currentTimeMillis(), cfg, Store.allRules(),
@@ -244,6 +251,8 @@ class ReplyService : NotificationListenerService() {
             ).also { Store.saveState() }
         }
         Log.d(TAG, "${msg.chat}: ${d.reason}")
+        Store.trace("DECISAO", "${msg.chat} → ${d.reason}${if (d.rule.isNotEmpty()) " (${d.rule})" else ""} em ${(System.nanoTime() - started) / 1_000_000} ms" +
+            if (d.delayMs > 0) " · envio em ${d.delayMs / 1000} s" else "")
         if (d.replies.isEmpty()) { Store.log(msg.chat, msg.text, d.reason, d.trace); return }
         val open = sbn.notification.contentIntent
         if (cfg.alertOn) d.alert?.let { Alerts.show(this, "Carga pedida", it, open) }
@@ -286,7 +295,9 @@ class ReplyService : NotificationListenerService() {
                 delay(d.delayMs)
                 d.replies.forEachIndexed { i, text ->
                     if (i > 0) delay(1500)
-                    if (!send(action, text)) {
+                    val ok = send(action, text)
+                    Store.trace("ENVIO", "${msg.chat}: resposta ${i + 1} de ${d.replies.size} ${if (ok) "entregue ao WhatsApp" else "RECUSADA pelo WhatsApp"} (${text.length} caracteres)")
+                    if (!ok) {
                         rollback(msg.chat, before)
                         Store.log(msg.chat, msg.text, "Falhou ao enviar pelo WhatsApp (estado devolvido)")
                         return@launch
@@ -295,6 +306,7 @@ class ReplyService : NotificationListenerService() {
             } catch (e: CancellationException) {
                 // No rollback here: the newer message (or your pause) already changed this chat's state.
                 Store.log(msg.chat, msg.text, "Resposta cancelada antes de enviar")
+                Store.trace("ENVIO", "${msg.chat}: resposta cancelada antes de enviar (mensagem nova ou pausa)")
                 throw e
             }
             pending.remove(msg.chat)
@@ -319,6 +331,9 @@ class ReplyService : NotificationListenerService() {
 
     private fun removed(sbn: StatusBarNotification, reason: Int) {
         val cfg = Store.config
+        if (sbn.packageName in APPS) Store.trace("NOTIF", "${APPS[sbn.packageName]}: notificação apagada (${when (reason) {
+            REASON_CLICK -> "você tocou"; REASON_APP_CANCEL -> "lida ou respondida"; REASON_CANCEL -> "arrastada"; else -> "motivo $reason"
+        }}) · ${sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE) ?: "?"}")
         // Only real chats: WhatsApp's own notices ("Procurando novas mensagens") have no Reply button.
         if (!cfg.takeoverOn || sbn.packageName !in APPS || replyAction(sbn.notification) == null) return
         val msg = parse(sbn) ?: return

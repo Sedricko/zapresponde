@@ -142,6 +142,25 @@ object AiConfig {
         return json.decodeFromJsonElement(Config.serializer(), obj) to out
     }
 
+    /** Every setting that differs, "Nome: antes → depois"; secrets show only that they changed. */
+    fun diff(old: Config, new: Config): List<String> {
+        val a = json.parseToJsonElement(json.encodeToString(Config.serializer(), old)).jsonObject
+        val b = json.parseToJsonElement(json.encodeToString(Config.serializer(), new)).jsonObject
+        return b.keys.filter { a[it] != b[it] }.map { k ->
+            val name = LABELS[k] ?: k
+            if (k == "aiKey" || k == "sheetKey" || k == "sheetUrl") "$name: alterado" else "$name: ${show(a[k] ?: JsonNull)} → ${show(b.getValue(k))}"
+        }
+    }
+
+    /** Rules added, removed or edited, by name. */
+    fun diff(old: List<Rule>, new: List<Rule>): List<String> {
+        val before = old.associateBy { it.id }; val after = new.associateBy { it.id }
+        return after.values.filter { it.id !in before }.map { "regra nova \"${it.name}\"" } +
+            before.values.filter { it.id !in after }.map { "regra apagada \"${it.name}\"" } +
+            after.values.filter { r -> before[r.id]?.let { it != r } == true }.map { "regra editada \"${it.name}\"" } +
+            (if (before.keys.toList().filter { it in after } != after.keys.toList().filter { it in before }) listOf("ordem das regras mudou") else emptyList())
+    }
+
     private fun sameKind(a: JsonElement, b: JsonElement) = when (a) {
         is JsonArray -> b is JsonArray
         is JsonObject -> b is JsonObject

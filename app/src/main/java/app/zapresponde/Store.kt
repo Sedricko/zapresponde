@@ -61,6 +61,8 @@ object Store {
         state = load("state.json") ?: State()
         outbox = load("outbox.json") ?: Outbox()
         undo = load("undo.json") ?: Undo()
+        traceLog = load("trace.json") ?: emptyList()
+        Assistant.onTrace = { trace("IA", it) }
         // The app closed by an error last time: the handler below left the reason in crash.txt.
         File(dir, "crash.txt").takeIf { it.exists() }?.let { f ->
             log(INTERNAL, "O app fechou por erro", f.readText().lines().first().take(300), f.readText().lines().drop(1).take(6))
@@ -81,7 +83,32 @@ object Store {
     fun error(where: String, e: Throwable) {
         android.util.Log.w("ZapResponde", where, e)
         log(INTERNAL, where, "${e.javaClass.simpleName}: ${e.message}".take(300), e.stackTrace.take(4).map { "at $it" })
+        trace("ERRO", "$where: ${e.javaClass.name}: ${e.message} ← " + e.stackTrace.take(10).joinToString(" ← "))
     }
+
+    /**
+     * Internal monitoring: everything the app does, newest first, the last 3000 lines. Saved at most every 5 s on its
+     * own thread (encoding thousands of lines on each event would slow replies and the screen).
+     */
+    var traceLog = listOf<TraceEntry>()
+        private set
+    private val traceSaver = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private var traceDirty = false
+
+    fun trace(cat: String, msg: String) {
+        synchronized(this) {
+            traceLog = (listOf(TraceEntry(System.currentTimeMillis(), cat, msg.take(800))) + traceLog).take(3000)
+            if (traceDirty || !::dir.isInitialized) return
+            traceDirty = true
+        }
+        traceSaver.schedule({
+            val text = synchronized(this) { traceDirty = false; json.encodeToString(traceLog) }
+            val tmp = File(dir, "trace.json.tmp"); tmp.writeText(text); tmp.renameTo(File(dir, "trace.json"))
+        }, 5, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
+    @Synchronized
+    fun clearTrace(): Int { val n = traceLog.size; traceLog = emptyList(); save("trace.json", traceLog); return n }
 
     private inline fun <reified T> load(name: String): T? = runCatching {
         json.decodeFromString<T>(File(dir, name).readText())
@@ -112,21 +139,23 @@ object Store {
     @Synchronized
     fun undoAi() {
         if (undo.backup.isEmpty()) return
-        importBackup(undo.backup)
+        importBackup(undo.backup, "desfazer da IA")
         undo = Undo(); save("undo.json", undo)
     }
 
     fun exportBackup(): String = json.encodeToString(Backup(config = config.copy(aiKey = ""), rules = rules))
 
     /** Replaces settings and rules with a backup file's; throws with a readable message if it isn't one. */
-    fun importBackup(text: String) {
+    fun importBackup(text: String, origin: String = "backup") {
         val b = runCatching { json.decodeFromString<Backup>(text) }.getOrNull()
         require(b != null && b.app == "ZapResponde") { "Esse arquivo não é um backup do ZapResponde." }
-        updateConfig(b.config.copy(aiKey = config.aiKey)); updateRules(b.rules)
+        updateConfig(b.config.copy(aiKey = config.aiKey), origin); updateRules(b.rules, origin)
     }
 
+    /** [origin] says who changed it (você, IA, backup, desfazer): every change goes to the monitoring, before → after. */
     @Synchronized
-    fun updateConfig(c: Config) {
+    fun updateConfig(c: Config, origin: String = "você") {
+        if (::dir.isInitialized) AiConfig.diff(config, c).forEach { trace("CONFIG", "($origin) $it") }
         // Turning auto-reply on starts a fresh round: "reply once" counters reset.
         if (c.enabled && !config.enabled) {
             state.chats.values.forEach { it.rules.clear() }
@@ -136,7 +165,10 @@ object Store {
     }
 
     @Synchronized
-    fun updateRules(r: List<Rule>) { rules = r; save("rules.json", r) }
+    fun updateRules(r: List<Rule>, origin: String = "você") {
+        AiConfig.diff(rules, r).forEach { trace("REGRAS", "($origin) $it") }
+        rules = r; save("rules.json", r)
+    }
 
     @Synchronized
     fun updateSheet(s: SheetCache) { sheet = s; save("sheet.json", s) }
@@ -165,6 +197,7 @@ object Store {
         if (chats) { val keys = state.chats.keys.filter(::mine); keys.forEach { state.chats.remove(it) }; out += "${keys.size} conversas" }
         if (waiting) { val n = state.waiting.count { mine(it.chat) }; state.waiting.removeAll { mine(it.chat) }; out += "$n pedidos esperando carga" }
         if (chats || waiting) saveState()
+        trace("APP", "Limpar dados (${chat ?: "todas as conversas"}): ${out.joinToString()}")
         return out.joinToString()
     }
 
@@ -174,6 +207,7 @@ object Store {
         history = history.filter { now - it.time < keepMs }; save("history.json", history)
         events = events.filter { now - it.time < keepMs }; save("events.json", events)
         state.lastClean = now; saveState()
+        trace("APP", "Limpeza automática: mantidas ${keepMs / 3_600_000L} h de histórico e registro")
     }
 
     @Synchronized

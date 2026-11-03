@@ -215,3 +215,7 @@ data class HistoryEntry(
 /** One WhatsApp message the service saw, and what it decided: the "Registro" of the diagnostic. */
 @Serializable
 data class LogEntry(val time: Long, val chat: String, val text: String, val result: String, val trace: List<String> = emptyList())
+
+/** One line of the internal monitoring: [cat] is the area (NOTIF, DECISAO, ENVIO, PLANILHA, IA, CONFIG, REGRAS, SERVICO, ERRO, APP). */
+@Serializable
+data class TraceEntry(val time: Long, val cat: String, val msg: String)

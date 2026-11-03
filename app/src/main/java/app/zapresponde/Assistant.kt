@@ -18,6 +18,9 @@ import java.net.URL
 object Assistant {
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** Where each Gemini call is recorded (the app sets it to the internal monitoring; tests leave it silent). */
+    var onTrace: (String) -> Unit = {}
+
     /** The rule fields, as the AI must write a rule. */
     val RULE_FIELDS = """
         - name: nome curto da regra
@@ -117,11 +120,16 @@ object Assistant {
         var last = "O Gemini não respondeu."
         for (m in (listOf(model.trim()) + FALLBACK).filter { it.isNotEmpty() }.distinct()) {
             repeat(2) { attempt ->
+                val t0 = System.currentTimeMillis()
                 try {
-                    return call(key, m, prompt, jsonOut)
+                    return call(key, m, prompt, jsonOut).also { onTrace("Gemini $m: ok em ${System.currentTimeMillis() - t0} ms (pedido ${prompt.length}, resposta ${it.length} caracteres)") }
                 } catch (e: Retry) {
+                    onTrace("Gemini $m: ${e.message} (${System.currentTimeMillis() - t0} ms); tentando de novo ou outro modelo")
                     last = e.message.orEmpty()
                     if (attempt == 0 && "sobrecarregado" in last) Thread.sleep(2_000) else return@repeat
+                } catch (e: Exception) {
+                    onTrace("Gemini $m: falhou em ${System.currentTimeMillis() - t0} ms: ${e.message}")
+                    throw e
                 }
             }
         }

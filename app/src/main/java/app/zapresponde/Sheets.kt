@@ -57,10 +57,14 @@ object Sheets {
 
     fun read(cfg: Config, fast: Boolean = false): Pair<List<List<String>>, List<List<String>>> {
         val url = cfg.sheetUrl.trim() + "?key=" + URLEncoder.encode(cfg.sheetKey, "UTF-8")
-        val o = parse(readBody(open(url, if (fast) 8_000 else 30_000)))
+        val t0 = System.currentTimeMillis()
+        val o = runCatching { parse(readBody(open(url, if (fast) 8_000 else 30_000))) }
+            .onFailure { Store.trace("PLANILHA", "leitura ${if (fast) "rápida " else ""}FALHOU em ${System.currentTimeMillis() - t0} ms: ${it.message}") }.getOrThrow()
         scriptVersion = o["versao"]?.jsonPrimitive?.content ?: "antiga (sem número)"
         fun tab(name: String) = (o[name] as? JsonArray).orEmpty().map { row -> row.jsonArray.map { it.jsonPrimitive.content } }
-        return tab("Respostas") to tab("Consulta")
+        return (tab("Respostas") to tab("Consulta")).also {
+            Store.trace("PLANILHA", "leitura ${if (fast) "rápida " else ""}ok em ${System.currentTimeMillis() - t0} ms: ${it.second.size} linhas de cargas, ${it.first.size} de respostas, script $scriptVersion")
+        }
     }
 
     fun append(cfg: Config, sheet: String, header: List<String>, rows: List<List<String>>) {
@@ -73,10 +77,14 @@ object Sheets {
             requestMethod = "POST"; doOutput = true; instanceFollowRedirects = false
             setRequestProperty("Content-Type", "application/json")
         }
-        c.outputStream.use { it.write(payload.toByteArray()) }
-        // Apps Script runs doPost, then answers 302 to a URL that holds the result; fetch it with GET.
-        val body = if (c.responseCode in 300..399) readBody(open(c.getHeaderField("Location"))) else readBody(c)
-        parse(body)
+        val t0 = System.currentTimeMillis()
+        runCatching {
+            c.outputStream.use { it.write(payload.toByteArray()) }
+            // Apps Script runs doPost, then answers 302 to a URL that holds the result; fetch it with GET.
+            val body = if (c.responseCode in 300..399) readBody(open(c.getHeaderField("Location"))) else readBody(c)
+            parse(body)
+        }.onSuccess { Store.trace("PLANILHA", "${rows.size} linha(s) gravada(s) na aba $sheet em ${System.currentTimeMillis() - t0} ms") }
+            .onFailure { Store.trace("PLANILHA", "gravar ${rows.size} linha(s) na aba $sheet FALHOU: ${it.message}") }.getOrThrow()
     }
 
     /** Newest backup saved in the sheet's Backup tab, or null if there is none. */

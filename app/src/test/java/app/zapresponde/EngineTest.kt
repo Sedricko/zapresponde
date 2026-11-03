@@ -556,4 +556,22 @@ class EngineTest {
         // The real state is untouched when a copy is passed (the screen passes Store.stateCopy()).
         assertTrue(State().chats.isEmpty())
     }
+
+    @Test fun auditoriaDeMudancas() {
+        val a = Config(followMin = 60, freteOn = true, aiKey = "SEGREDO")
+        val d = AiConfig.diff(a, a.copy(followMin = 30, freteOn = false, aiKey = "OUTRO"))
+        assertTrue(d.toString(), d.contains("Link do grupo: esperar (min, 1 a 1440): 60 → 30") && d.any { it.startsWith("Respostas de frete") && it.endsWith("ligado → desligado") })
+        assertTrue(d.toString(), d.any { it.endsWith(": alterado") } && d.none { "SEGREDO" in it || "OUTRO" in it })
+        assertTrue(AiConfig.diff(a, a).isEmpty())
+        val r1 = Rule(name = "Oi", replies = listOf("a")); val r2 = Rule(name = "Preço", replies = listOf("b"))
+        assertEquals(listOf("regra nova \"Preço\""), AiConfig.diff(listOf(r1), listOf(r1, r2)))
+        assertEquals(listOf("regra apagada \"Oi\""), AiConfig.diff(listOf(r1, r2), listOf(r2)))
+        assertEquals(listOf("regra editada \"Oi\""), AiConfig.diff(listOf(r1), listOf(r1.copy(replies = listOf("c")))))
+        assertEquals(listOf("ordem das regras mudou"), AiConfig.diff(listOf(r1, r2), listOf(r2, r1)))
+        // Gemini calls are recorded through the hook the app sets.
+        val seen = mutableListOf<String>(); Assistant.onTrace = { seen += it }
+        runCatching { Assistant.gemini("", "", "x") }
+        Assistant.onTrace = {}
+        assertTrue(seen.toString(), seen.isNotEmpty())
+    }
 }

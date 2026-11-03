@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Store.init(this)
+        Store.trace("APP", "App aberto · versão ${packageManager.getPackageInfo(packageName, 0).versionName} · Android ${Build.VERSION.RELEASE}")
         Sheets.schedule(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         setContent { ZapTheme { App() } }
@@ -822,6 +823,7 @@ fun CleanScreen() {
     var events by remember { mutableStateOf(true) }
     var chats by remember { mutableStateOf(true) }
     var waiting by remember { mutableStateOf(true) }
+    var monitor by remember { mutableStateOf(false) }
     var chat by rememberSaveable { mutableStateOf("") }
     var confirm by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf("") }
@@ -838,7 +840,8 @@ fun CleanScreen() {
         SwitchRow("Registro do Diagnóstico", events, "${n(Store.events.map { it.chat })} mensagens · motivos e problemas") { events = it }
         SwitchRow("Estado das conversas", chats, "${n(synchronized(Store) { Store.state.chats.keys.toList() })} conversas · pausas, boas-vindas, regras \"uma vez\", link do grupo e carga já enviados") { chats = it }
         SwitchRow("Pedidos esperando carga", waiting, "${n(synchronized(Store) { Store.state.waiting.map { it.chat } })} pedidos") { waiting = it }
-        Button({ confirm = true }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = history || events || chats || waiting) {
+        if (who == null) SwitchRow("Monitoramento interno", monitor, "${Store.traceLog.size} linhas · desligado de fábrica: é o que se analisa depois") { monitor = it }
+        Button({ confirm = true }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = history || events || chats || waiting || monitor) {
             Icon(Icons.Default.Delete, null); Spacer(Modifier.width(6.dp)); Text(if (who == null) "Limpar de todas as conversas" else "Limpar só de $who")
         }
         if (done.isNotEmpty()) Text("✅ Apagado: $done", color = MaterialTheme.colorScheme.primary)
@@ -857,9 +860,13 @@ fun CleanScreen() {
         onDismissRequest = { confirm = false },
         title = { Text("Apagar?") },
         text = { Text((if (who == null) "De todas as conversas: " else "Da conversa $who: ") + listOfNotNull(
-            "histórico".takeIf { history }, "registro".takeIf { events }, "estado das conversas".takeIf { chats }, "pedidos esperando".takeIf { waiting },
+            "histórico".takeIf { history }, "registro".takeIf { events }, "estado das conversas".takeIf { chats }, "pedidos esperando".takeIf { waiting }, "monitoramento interno".takeIf { monitor && who == null },
         ).joinToString() + ". Não dá para desfazer.") },
-        confirmButton = { TextButton({ done = Store.clear(history, events, chats, waiting, who); confirm = false }) { Text("Apagar") } },
+        confirmButton = { TextButton({
+            done = listOfNotNull(Store.clear(history, events, chats, waiting, who).ifEmpty { null },
+                if (monitor && who == null) "${Store.clearTrace()} linhas do monitoramento" else null).joinToString()
+            confirm = false
+        }) { Text("Apagar") } },
         dismissButton = { TextButton({ confirm = false }) { Text("Cancelar") } },
     )
 }
@@ -1278,7 +1285,8 @@ fun AssistantScreen() {
                 Button({
                     Store.saveUndo()
                     val (newCfg, newRules) = AiConfig.apply(Store.config, Store.rules, p.changes.filterIndexed { i, _ -> i in chosen })
-                    Store.updateConfig(newCfg); Store.updateRules(newRules)
+                    Store.trace("IA", "Assistente: aplicadas ${chosen.size} de ${p.changes.size} mudança(s) propostas para \"${request.take(100)}\"")
+                    Store.updateConfig(newCfg, "IA"); Store.updateRules(newRules, "IA")
                     status = "✅ ${chosen.size} mudança(s) aplicada(s). Dá para desfazer logo abaixo."
                     proposal = null; request = ""
                 }, Modifier.weight(1f), enabled = chosen.isNotEmpty()) { Text("Aplicar ${chosen.size}") }
@@ -1425,7 +1433,7 @@ fun HelpScreen(open: (String) -> Unit) {
             if (withAi) {
                 answer = "A IA está analisando o relatório..."
                 answer = runCatching {
-                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report, c, Store.allRules(), question), jsonOut = false) }
+                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(150), c, Store.allRules(), question), jsonOut = false) }
                 }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
             }
             busy = false
@@ -1441,6 +1449,15 @@ fun HelpScreen(open: (String) -> Unit) {
         selfTest.takeIf { it.isNotEmpty() }?.let { "AUTOTESTE\n" + it.joinToString("\n") },
         report.takeIf { it.isNotEmpty() && it != "Testando..." },
     ).joinToString("\n\n")
+    var saved by remember { mutableStateOf("") }
+    val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) saved = runCatching {
+            val text = "RELATÓRIO COMPLETO ZAPRESPONDE\n\n" + everything() + "\n\n— Monitoramento interno (${Store.traceLog.size} linhas, mais recentes primeiro)\n" + traceText(null)
+            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
+            Store.trace("APP", "Relatório completo salvo (${text.length / 1024} KB)")
+            "✅ Relatório salvo (${text.length / 1024} KB)."
+        }.getOrElse { "❌ Não consegui salvar: ${it.message}" }
+    }
     Panel("Relatório e testes") {
         if (withAi) Field("Pergunta para a IA (opcional)", question, help = "Ex.: por que respondeu várias vezes para o Meu?", maxLines = 3) { question = it }
         Button({ run() }, Modifier.fillMaxWidth(), enabled = !busy) {
@@ -1448,9 +1465,13 @@ fun HelpScreen(open: (String) -> Unit) {
             Text(if (withAi) "Rodar diagnóstico e análise da IA" else "Rodar diagnóstico completo")
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton({ share(everything(), "Enviar relatório") }, Modifier.weight(1f), enabled = !busy && everything().isNotEmpty()) { Text("Compartilhar") }
-            OutlinedButton({ clipboard.setText(AnnotatedString(everything())) }, Modifier.weight(1f), enabled = !busy && everything().isNotEmpty()) { Text("Copiar tudo") }
+            OutlinedButton({ share(everything() + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(300), "Enviar relatório") }, Modifier.weight(1f), enabled = !busy) { Text("Compartilhar") }
+            OutlinedButton({ clipboard.setText(AnnotatedString(everything() + "\n\n— Monitoramento interno\n" + traceText(null))) }, Modifier.weight(1f), enabled = !busy) { Text("Copiar tudo") }
         }
+        // The whole file (every monitoring line) goes where you choose: Google Drive, pCloud or a phone folder.
+        Button({ saveFile.launch("zapresponde-relatorio-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date()) + ".txt") },
+            Modifier.fillMaxWidth(), enabled = !busy) { Text("Salvar relatório completo (escolher onde)") }
+        if (saved.isNotEmpty()) Hint(saved)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Runs the main features on a copy of the state, with the real settings, rules and sheet; nothing is sent.
             OutlinedButton({
@@ -1490,7 +1511,8 @@ fun HelpScreen(open: (String) -> Unit) {
     // Problems found → the assistant proposes the fixes (each one still applied only with your tap).
     if (report.isNotEmpty() && !busy && (problems.orEmpty().any { it.level <= 1 } || internal.any { "❌" in it || "⚠️" in it })) {
         Button({
-            AiPrefill.context = (if (answer.isNotEmpty() && !answer.startsWith("❌")) "ANÁLISE DA IA\n$answer\n\n" else "") + report
+            AiPrefill.context = (if (answer.isNotEmpty() && !answer.startsWith("❌")) "ANÁLISE DA IA\n$answer\n\n" else "") + report +
+                "\n\n— Monitoramento interno (mais recentes)\n" + traceText(150)
             AiPrefill.request = "Corrija os problemas e conflitos apontados no diagnóstico. Mude só o necessário e não mexa no que está funcionando."
             open("ai")
         }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank()) {
@@ -1503,6 +1525,7 @@ fun HelpScreen(open: (String) -> Unit) {
         Hint("Feito com os seus ajustes, regras e planilha, numa cópia das conversas: nada foi enviado. Agenda e atraso ficam de fora do teste.")
     }
     LogPanel()
+    TracePanel()
     if (report.isNotEmpty()) Panel("Relatório") {
         Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
     }
@@ -1550,6 +1573,19 @@ private fun internalLines(ctx: android.content.Context): List<String> {
             if (Store.sheet.error.isNotEmpty()) " · último erro: ${Store.sheet.error.take(120)}" else ""
     out += "  ℹ️ Guardado no celular: ${Store.history.size} respostas, ${Store.events.size} registros, ${Store.state.chats.size} conversas, ${Store.state.waiting.size} pedidos esperando"
     out += "  ℹ️ Na memória agora: ${ReplyService.instance?.approvalsPending() ?: 0} aprovação(ões) pendente(s)"
+    val week = Store.traceLog.filter { now - it.time < 24 * 3_600_000L }
+    val decisions = week.filter { it.cat == "DECISAO" }.mapNotNull { Regex(""" em (\d+) ms""").find(it.msg)?.groupValues?.get(1)?.toLongOrNull() }
+    out += "Monitoramento (24 h)"
+    out += "  ℹ️ " + week.groupingBy { it.cat }.eachCount().entries.sortedBy { it.key }.joinToString { "${it.key} ${it.value}" }.ifEmpty { "nada registrado" }
+    if (decisions.isNotEmpty()) out += "  ${if (decisions.max() > 500) "⚠️" else "✅"} Decisões: ${decisions.size}, média ${decisions.average().toLong()} ms, mais lenta ${decisions.max()} ms"
+    val sends = week.filter { it.cat == "ENVIO" }
+    if (sends.any { "RECUSADA" in it.msg }) out += "  ⚠️ Envios recusados pelo WhatsApp: ${sends.count { "RECUSADA" in it.msg }}"
+    val sheetFails = week.count { it.cat == "PLANILHA" && "FALHOU" in it.msg }
+    out += "  ${if (sheetFails == 0) "✅" else "⚠️"} Planilha: ${week.count { it.cat == "PLANILHA" && "ok em" in it.msg }} leitura(s) ok, $sheetFails falha(s)"
+    val ai = week.filter { it.cat == "IA" && "Gemini" in it.msg }
+    if (ai.isNotEmpty()) out += "  ℹ️ IA: ${ai.count { ": ok em" in it.msg }} chamada(s) ok, ${ai.count { ": ok em" !in it.msg }} com erro ou nova tentativa"
+    val changes = week.filter { it.cat == "CONFIG" || it.cat == "REGRAS" }
+    if (changes.isNotEmpty()) out += "  ℹ️ Mudanças: ${changes.size} (" + changes.groupingBy { it.msg.substringAfter("(").substringBefore(")") }.eachCount().entries.joinToString { "${it.key} ${it.value}" } + ")"
     out += "Versões"
     out += "  ℹ️ App ${version(ctx.packageName)} · script da planilha ${Sheets.scriptVersion.ifEmpty { "?" }} · Android ${android.os.Build.VERSION.RELEASE}"
     out += "  ℹ️ WhatsApp ${version("com.whatsapp")} · WhatsApp Business ${version("com.whatsapp.w4b")}"
@@ -1561,6 +1597,35 @@ private fun currentProblems() = synchronized(Store) {
         Store.config, Store.events, Store.history, Store.state, Store.sheet.consulta, Store.sheet.error, Store.sheet.syncedAt,
         ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
     )
+}
+
+private val TRACE_TIME = SimpleDateFormat("dd/MM HH:mm:ss.SSS", Locale("pt", "BR"))
+
+/** The internal monitoring as text, newest first: all lines, or the [n] most recent. */
+private fun traceText(n: Int?): String = (if (n == null) Store.traceLog else Store.traceLog.take(n))
+    .joinToString("\n") { "${synchronized(TRACE_TIME) { TRACE_TIME.format(Date(it.time)) }} [${it.cat}] ${it.msg}" }
+
+/** Everything the app does inside, by area: notifications, decisions, sends, sheet, AI, setting changes, errors. */
+@Composable
+private fun TracePanel() {
+    var cat by rememberSaveable { mutableStateOf("Tudo") }
+    var shown by remember { mutableStateOf(60) }
+    val all = Store.traceLog
+    val cats = listOf("Tudo") + all.map { it.cat }.distinct().sorted()
+    val list = remember(all, cat) { if (cat == "Tudo") all else all.filter { it.cat == cat } }
+    Panel("Monitoramento interno (${all.size})") {
+        Hint("Tudo o que acontece por dentro do app, com horário em milissegundos: notificações, decisões e quanto levaram, envios, planilha, IA, mudanças de ajustes e regras (e quem mudou) e erros com o rastro do código. Guarda as últimas 3000 linhas.")
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            cats.forEach { k -> FilterChip(cat == k, { cat = k; shown = 60 }, { Text(k) }) }
+        }
+        if (list.isEmpty()) Hint("Nada registrado ainda.")
+        list.take(shown).forEach { t ->
+            Text("${synchronized(TRACE_TIME) { TRACE_TIME.format(Date(t.time)) }} [${t.cat}] ${t.msg}", style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace, color = if (t.cat == "ERRO") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(vertical = 2.dp))
+        }
+        if (list.size > shown) TextButton({ shown += 60 }, Modifier.fillMaxWidth()) { Text("Mostrar mais (${list.size - shown})") }
+    }
 }
 
 /** The live record of every message and event, with filters; tapping a line shows the path of the decision. */
