@@ -82,7 +82,7 @@ object AiConfig {
         append("\nValores atuais:\n").append(json.encodeToString(Config.serializer(), cfg).let { stripForbidden(it) })
         append("\n\nRegras do app, em ordem (a primeira que casar responde):\n")
         append(json.encodeToString(ListSerializer(Rule.serializer()), rules.filter { !it.fromSheet }))
-        if (context.isNotBlank()) append("\n\nContexto (diagnóstico do app):\n").append(context.take(12_000))
+        if (context.isNotBlank()) append("\n\nContexto (diagnóstico do app):\n").append(context.take(150_000))
         append("\n\nPedido do dono: ").append(request.trim())
     }
 

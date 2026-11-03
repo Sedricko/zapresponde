@@ -1433,7 +1433,7 @@ fun HelpScreen(open: (String) -> Unit) {
             if (withAi) {
                 answer = "A IA está analisando o relatório..."
                 answer = runCatching {
-                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(150), c, Store.allRules(), question), jsonOut = false) }
+                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(AI_TRACE_LINES), c, Store.allRules(), question), jsonOut = false) }
                 }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
             }
             busy = false
@@ -1512,7 +1512,7 @@ fun HelpScreen(open: (String) -> Unit) {
     if (report.isNotEmpty() && !busy && (problems.orEmpty().any { it.level <= 1 } || internal.any { "❌" in it || "⚠️" in it })) {
         Button({
             AiPrefill.context = (if (answer.isNotEmpty() && !answer.startsWith("❌")) "ANÁLISE DA IA\n$answer\n\n" else "") + report +
-                "\n\n— Monitoramento interno (mais recentes)\n" + traceText(150)
+                "\n\n— Monitoramento interno (mais recentes)\n" + traceText(AI_TRACE_LINES)
             AiPrefill.request = "Corrija os problemas e conflitos apontados no diagnóstico. Mude só o necessário e não mexa no que está funcionando."
             open("ai")
         }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank()) {
@@ -1598,6 +1598,9 @@ private fun currentProblems() = synchronized(Store) {
         ReplyService.instance?.approvalsPending() ?: 0, System.currentTimeMillis(),
     )
 }
+
+/** Monitoring lines the AI reads with the diagnostic and with "Corrigir com a IA". */
+private const val AI_TRACE_LINES = 500
 
 private val TRACE_TIME = SimpleDateFormat("dd/MM HH:mm:ss.SSS", Locale("pt", "BR"))
 
