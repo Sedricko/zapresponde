@@ -391,7 +391,8 @@ internal fun ContactPicker(pad: PaddingValues, done: () -> Unit) {
     val ctx = LocalContext.current
     val selected = remember { Store.config.contactsList.lines().map { it.trim() }.filter { it.isNotEmpty() } }
     var all by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(Unit) { all = withContext(Dispatchers.IO) { Contacts.all(ctx) } }
+    // A failed read (e.g. permission taken back meanwhile) shows an empty list instead of closing the app.
+    LaunchedEffect(Unit) { all = withContext(Dispatchers.IO) { runCatching { Contacts.all(ctx) }.onFailure { Store.error("ler contatos", it) }.getOrDefault(emptyList()) } }
     var query by remember { mutableStateOf("") }
     val chosen = remember { mutableStateListOf<String>().apply { addAll(selected) } }
     fun finish() { cfg { copy(contactsList = chosen.distinct().joinToString("\n")) }; done() }

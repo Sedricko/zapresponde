@@ -1,5 +1,6 @@
 package app.zapresponde.ui
 
+import androidx.compose.runtime.LaunchedEffect
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
@@ -262,7 +263,8 @@ internal const val AI_TRACE_LINES = 500
 internal fun TracePanel() {
     var cat by rememberSaveable { mutableStateOf("Tudo") }
     var shown by remember { mutableStateOf(60) }
-    val all = Store.traceLog
+    val tick = liveTick()
+    val all = remember(tick) { Store.traceLog }
     val cats = listOf("Tudo") + all.map { it.cat }.distinct().sorted()
     val list = remember(all, cat) { if (cat == "Tudo") all else all.filter { it.cat == cat } }
     Panel("Monitoramento interno (${all.size})") {
@@ -286,7 +288,8 @@ internal fun LogPanel() {
     var filter by rememberSaveable { mutableStateOf("Tudo") }
     var shown by remember { mutableStateOf(40) }
     var open by remember { mutableStateOf(-1L) }
-    val all = Store.events
+    val tick = liveTick()
+    val all = remember(tick) { Store.events }
     val filters = linkedMapOf<String, (app.zapresponde.LogEntry) -> Boolean>(
         "Tudo" to { true },
         "Falhas" to { e -> e.chat == Store.INTERNAL || listOf("Falhou", "não enviado", "não atualizou", "cancelad", "Sem botão").any { it in e.result } },
@@ -320,6 +323,14 @@ internal fun LogPanel() {
         }
         if (list.size > shown) TextButton({ shown += 40 }, Modifier.fillMaxWidth()) { Text("Mostrar mais (${list.size - shown})") }
     }
+}
+
+/** Changes every 3 s while the screen is open: the record and the monitoring are plain lists, not observed state. */
+@Composable
+private fun liveTick(): Int {
+    var tick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(3_000); tick++ } }
+    return tick
 }
 
 /** One problem: what happened, why, and a button that fixes it when one tap can. */
