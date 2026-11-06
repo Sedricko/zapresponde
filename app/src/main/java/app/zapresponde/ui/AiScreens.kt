@@ -65,7 +65,7 @@ fun AssistantScreen() {
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     fun ask() {
-        busy = true; status = "Pedindo ao Gemini..."; proposal = null
+        busy = true; status = ""; proposal = null
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
@@ -74,8 +74,8 @@ fun AssistantScreen() {
             }.fold({ p ->
                 proposal = p
                 chosen = p.changes.indices.filter { p.changes[it].problems.isEmpty() }.toSet()
-                status = if (p.changes.isEmpty()) "A IA não propôs nenhuma mudança." else ""
-            }, { status = it.message ?: "Falhou: tente de novo." })
+                status = if (p.changes.isEmpty()) "ℹ️ A IA não propôs nenhuma mudança." else ""
+            }, { status = "❌ " + (it.message ?: "Falhou: tente de novo.") })
             busy = false
         }
     }
@@ -96,11 +96,10 @@ fun AssistantScreen() {
     Panel("O que você quer mudar?") {
         Field("Pedido", request, lines = 2, maxLines = 5,
             help = "Ex.: \"muda o link do grupo para 30 minutos\" · \"coloca Frete Bras Publicações nas exceções\" · \"quando perguntarem quanto tá pagando, responde que o valor está na carga\"") { request = it; context = "" }
-        Button({ ask() }, Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank() && request.isNotBlank() && !busy) {
-            Icon(Icons.AutoMirrored.Filled.Send, null); Spacer(Modifier.width(6.dp)); Text("Pedir à IA")
-        }
+        BusyButton(if (busy) "A IA está pensando..." else "Pedir à IA", busy, Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            enabled = c.aiOn && c.aiKey.isNotBlank() && request.isNotBlank()) { ask() }
         if (context.isNotEmpty()) Hint("A IA também recebeu o diagnóstico mais recente.")
-        if (status.isNotEmpty()) Text(status, color = if (busy || status.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        if (!busy) Status(status)
         if (!c.aiOn || c.aiKey.isBlank()) Hint("Ligue o assistente e cole a chave acima. Vão para o Gemini os seus ajustes e regras (sem chaves nem link da planilha) e o seu pedido.")
     }
     proposal?.let { p ->
@@ -161,8 +160,9 @@ internal fun RuleTestPanel(only: String? = null) {
                 Text(r.name)
             }
         }
-        Button({
-            busy = true; status = "Pedindo testes ao Gemini..."; result = null
+        BusyButton(if (busy) "A IA está testando..." else "Testar ${picked.size} regra(s)", busy, Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            enabled = c.aiOn && c.aiKey.isNotBlank() && picked.isNotEmpty()) {
+            busy = true; status = ""; result = null
             scope.launch {
                 runCatching {
                     withContext(Dispatchers.IO) {
@@ -174,10 +174,8 @@ internal fun RuleTestPanel(only: String? = null) {
                 }.fold({ result = it; status = "" }, { status = it.message ?: "Falhou: tente de novo." })
                 busy = false
             }
-        }, Modifier.fillMaxWidth().padding(vertical = 8.dp), enabled = c.aiOn && c.aiKey.isNotBlank() && picked.isNotEmpty() && !busy) {
-            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Testar ${picked.size} regra(s)")
         }
-        if (status.isNotEmpty()) Text(status, color = if (busy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        if (status.isNotEmpty()) Status("❌ $status")
         result?.let { (tests, notes) ->
             val ok = tests.count { (t, got) -> t.expected.trim().equals(got, true) }
             Text("$ok de ${tests.size} testes bateram", fontWeight = FontWeight.Bold)

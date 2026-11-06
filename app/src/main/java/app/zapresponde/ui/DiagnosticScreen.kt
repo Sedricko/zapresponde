@@ -79,7 +79,9 @@ fun HelpScreen(open: (String) -> Unit) {
     val access = resumeTick >= 0 && NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
     val battery = resumeTick >= 0 && ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(ctx.packageName)
     val notifs = resumeTick >= 0 && NotificationManagerCompat.from(ctx).areNotificationsEnabled()
-    Panel("Verificações") {
+    var dtab by rememberSaveable { mutableStateOf(0) }
+    Tabs(listOf("Resumo", "Registro", "Monitoramento", "Ajuda"), dtab) { dtab = it }
+    if (dtab == 0) Panel("Verificações") {
         Check("Acesso às notificações", access) { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         Divider()
         Check("Sem economia de bateria", battery) {
@@ -102,72 +104,93 @@ fun HelpScreen(open: (String) -> Unit) {
     var busy by remember { mutableStateOf(false) }
     val withAi = c.aiDiagOn && c.aiKey.isNotBlank()
     // One button: the full report and, with the AI on, its analysis right after.
+    var step by remember { mutableStateOf("") }
     fun run() {
-        busy = true; report = "Testando..."; answer = ""; problems = null
+        busy = true; report = ""; answer = ""; problems = null; step = "Rodando o diagnóstico..."
         scope.launch {
-            report = withContext(Dispatchers.IO) { diagnose(ctx) }
-            problems = currentProblems()
-            internal = withContext(Dispatchers.IO) { internalLines(ctx) }
-            if (withAi) {
-                answer = "A IA está analisando o relatório..."
-                answer = runCatching {
-                    withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(AI_TRACE_LINES), c, Store.allRules(), question), jsonOut = false) }
-                }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
-            }
-            busy = false
+            // Everything heavy off the screen thread, and the button always comes back, even after an error.
+            try {
+                withContext(Dispatchers.IO) {
+                    val r = diagnose(ctx)
+                    val p = currentProblems()
+                    val i = internalLines(ctx)
+                    Triple(r, p, i)
+                }.let { (r, p, i) -> report = r; problems = p; internal = i }
+                if (withAi) {
+                    step = "A IA está analisando o relatório..."
+                    answer = runCatching {
+                        withContext(Dispatchers.IO) { Assistant.gemini(c.aiKey, c.aiModel, Assistant.diagnosisPrompt(report + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(AI_TRACE_LINES), c, Store.allRules(), question), jsonOut = false) }
+                    }.getOrElse { "❌ " + (it.message ?: "Falhou: tente de novo.") }
+                }
+                step = "✅ Diagnóstico pronto."
+            } catch (e: Exception) {
+                Store.error("diagnóstico", e); step = "❌ O diagnóstico falhou: ${e.message}"
+            } finally { busy = false }
         }
     }
     fun share(text: String, title: String) =
         ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), title))
 
     var selfTest by remember { mutableStateOf<List<String>>(emptyList()) }
+    var testing by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     fun everything() = listOfNotNull(
         answer.takeIf { it.isNotEmpty() && !it.startsWith("❌") }?.let { "ANÁLISE DA IA\n\n$it" },
         selfTest.takeIf { it.isNotEmpty() }?.let { "AUTOTESTE\n" + it.joinToString("\n") },
-        report.takeIf { it.isNotEmpty() && it != "Testando..." },
+        report.takeIf { it.isNotEmpty() },
     ).joinToString("\n\n")
     var saved by remember { mutableStateOf("") }
     val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) saved = runCatching {
-            val text = "RELATÓRIO COMPLETO ZAPRESPONDE\n\n" + everything() + "\n\n— Monitoramento interno (${Store.traceLog.size} linhas, mais recentes primeiro)\n" + traceText(null)
-            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
-            Store.trace("APP", "Relatório completo salvo (${text.length / 1024} KB)")
-            "✅ Relatório salvo (${text.length / 1024} KB)."
-        }.getOrElse { "❌ Não consegui salvar: ${it.message}" }
-    }
-    Panel("Relatório e testes") {
-        if (withAi) Field("Pergunta para a IA (opcional)", question, help = "Ex.: por que respondeu várias vezes para o Meu?", maxLines = 3) { question = it }
-        Button({ run() }, Modifier.fillMaxWidth(), enabled = !busy) {
-            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp))
-            Text(if (withAi) "Rodar diagnóstico e análise da IA" else "Rodar diagnóstico completo")
+        if (uri == null) return@rememberLauncherForActivityResult
+        saving = true; saved = "Salvando..."
+        val head = everything()
+        scope.launch {
+            // Thousands of monitoring lines: built and written off the screen thread.
+            saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = "RELATÓRIO COMPLETO ZAPRESPONDE\n\n" + head + "\n\n— Monitoramento interno (${Store.traceLog.size} linhas, mais recentes primeiro)\n" + traceText(null)
+                    val out = ctx.contentResolver.openOutputStream(uri) ?: error("o local escolhido não aceitou o arquivo")
+                    out.use { it.write(text.toByteArray()) }
+                    Store.trace("APP", "Relatório completo salvo (${text.length / 1024} KB)")
+                    "✅ Relatório salvo (${text.length / 1024} KB)."
+                }.getOrElse { "❌ Não consegui salvar: ${it.message}" }
+            }
+            saving = false
         }
+    }
+    if (dtab == 0) Panel("Relatório e testes") {
+        if (withAi) Field("Pergunta para a IA (opcional)", question, help = "Ex.: por que respondeu várias vezes para o Meu?", maxLines = 3) { question = it }
+        BusyButton(if (withAi) "Rodar diagnóstico e análise da IA" else "Rodar diagnóstico completo", busy) { run() }
+        Status(step)
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ share(everything() + "\n\n— Monitoramento interno (mais recentes)\n" + traceText(300), "Enviar relatório") }, Modifier.weight(1f), enabled = !busy) { Text("Compartilhar") }
             OutlinedButton({ clipboard.setText(AnnotatedString(everything() + "\n\n— Monitoramento interno\n" + traceText(null))) }, Modifier.weight(1f), enabled = !busy) { Text("Copiar tudo") }
         }
         // The whole file (every monitoring line) goes where you choose: Google Drive, pCloud or a phone folder.
-        Button({ saveFile.launch("zapresponde-relatorio-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date()) + ".txt") },
-            Modifier.fillMaxWidth(), enabled = !busy) { Text("Salvar relatório completo (escolher onde)") }
-        if (saved.isNotEmpty()) Hint(saved)
+        BusyButton("Salvar relatório completo (escolher onde)", saving, enabled = !busy) {
+            saveFile.launch("zapresponde-relatorio-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date()) + ".txt")
+        }
+        Status(saved)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Runs the main features on a copy of the state, with the real settings, rules and sheet; nothing is sent.
-            OutlinedButton({
-                selfTest = listOf("Testando...")
+            BusyButton("Autoteste", testing, Modifier.weight(1f), enabled = !busy, outlined = true) {
+                testing = true
                 scope.launch {
                     selfTest = withContext(Dispatchers.Default) {
                         runCatching { Problems.selfTest(Store.config, Store.allRules(), Store.sheet.consulta, Store.stateCopy(), LocalDateTime.now(), Sheets.scriptVersion) }
                             .getOrElse { listOf("❌ O autoteste falhou: ${it.message}") }
                     }
+                    testing = false
                 }
-            }, Modifier.weight(1f), enabled = !busy) { Text("Autoteste") }
+            }
             OutlinedButton({ open("clean") }, Modifier.weight(1f)) { Text("Limpar registro") }
         }
         SwitchRow("Análise pela IA junto", c.aiDiagOn, "O relatório, com o texto das últimas mensagens, vai para o Gemini") { cfg { copy(aiDiagOn = it) } }
         if (c.aiDiagOn && c.aiKey.isBlank()) Hint("Cole a chave do Gemini em Ferramentas > Assistente de IA.")
         SwitchRow("Avisar na hora se algo grave acontecer", c.problemAlertOn, "Vibra quando, por exemplo, o app responde várias vezes a um robô") { cfg { copy(problemAlertOn = it) } }
     }
-    problems?.let { list ->
+    if (dtab == 0) problems?.let { list ->
         Panel(if (list.any { it.level <= 1 }) "Problemas encontrados (${list.count { it.level <= 1 }})" else "Problemas encontrados") {
             if (list.isEmpty()) Text("✅ Nenhum problema nas últimas 24 h.")
             list.forEachIndexed { i, pr ->
@@ -176,18 +199,18 @@ fun HelpScreen(open: (String) -> Unit) {
             }
         }
     }
-    if (internal.isNotEmpty()) Panel("Funcionamento interno") {
+    if (dtab == 0 && internal.isNotEmpty()) Panel("Funcionamento interno") {
         internal.forEach { line ->
             val title = !line.startsWith(" ")
             Text(line.trim(), style = if (title) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodySmall,
                 fontWeight = if (title) FontWeight.Bold else null, modifier = Modifier.padding(top = if (title) 10.dp else 2.dp))
         }
     }
-    if (answer.isNotEmpty()) Panel("Análise da IA") {
+    if (dtab == 0 && answer.isNotEmpty()) Panel("Análise da IA") {
         Text(answer, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
     }
     // Problems found → the assistant proposes the fixes (each one still applied only with your tap).
-    if (report.isNotEmpty() && !busy && (problems.orEmpty().any { it.level <= 1 } || internal.any { "❌" in it || "⚠️" in it })) {
+    if (dtab == 0 && report.isNotEmpty() && !busy && (problems.orEmpty().any { it.level <= 1 } || internal.any { "❌" in it || "⚠️" in it })) {
         Button({
             AiPrefill.context = (if (answer.isNotEmpty() && !answer.startsWith("❌")) "ANÁLISE DA IA\n$answer\n\n" else "") + report +
                 "\n\n— Monitoramento interno (mais recentes)\n" + traceText(AI_TRACE_LINES)
@@ -198,16 +221,16 @@ fun HelpScreen(open: (String) -> Unit) {
         }
         if (!c.aiOn || c.aiKey.isBlank()) Hint("Para corrigir com a IA, ligue o Assistente de IA e cole a chave do Gemini.")
     }
-    if (selfTest.isNotEmpty()) Panel(if (selfTest.any { it.startsWith("❌") }) "Autoteste (${selfTest.count { it.startsWith("❌") }} falha(s))" else "Autoteste") {
+    if (dtab == 0 && selfTest.isNotEmpty()) Panel(if (selfTest.any { it.startsWith("❌") }) "Autoteste (${selfTest.count { it.startsWith("❌") }} falha(s))" else "Autoteste") {
         selfTest.forEach { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
         Hint("Feito com os seus ajustes, regras e planilha, numa cópia das conversas: nada foi enviado. Agenda e atraso ficam de fora do teste.")
     }
-    LogPanel()
-    TracePanel()
-    if (report.isNotEmpty()) Panel("Relatório") {
+    if (dtab == 1) LogPanel()
+    if (dtab == 2) TracePanel()
+    if (dtab == 0 && report.isNotEmpty()) Panel("Relatório") {
         Text(report, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
     }
-    Panel("Ações") {
+    if (dtab == 3) Panel("Ações") {
         FeatureRow(Icons.Default.Notifications, "Notificações do WhatsApp", "Precisam estar ligadas para o app responder", null) {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:com.whatsapp")))
         }
@@ -221,7 +244,7 @@ fun HelpScreen(open: (String) -> Unit) {
             NotificationListenerService.requestRebind(ComponentName(ctx, ReplyService::class.java))
         }
     }
-    Panel("Dicas") {
+    if (dtab == 3) Panel("Dicas") {
         Hint(
             "• O app só responde quando aparece notificação. Com a conversa aberta ou silenciada, não responde.\n" +
                 "• Xiaomi, Samsung e Motorola: libere \"início automático\" e tire o app da economia de bateria.\n" +

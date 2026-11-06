@@ -21,6 +21,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -175,3 +182,45 @@ fun Hint(text: String) = Text(
     text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     modifier = Modifier.padding(vertical = 6.dp),
 )
+
+/** A button that shows a spinner and stays disabled while its work runs, so a second tap cannot start it twice. */
+@Composable
+fun BusyButton(text: String, busy: Boolean, modifier: Modifier = Modifier.fillMaxWidth(), enabled: Boolean = true, outlined: Boolean = false, onClick: () -> Unit) {
+    val content: @Composable () -> Unit = {
+        if (busy) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
+        Text(text)
+    }
+    if (outlined) OutlinedButton(onClick, modifier, enabled = enabled && !busy) { content() }
+    else Button(onClick, modifier, enabled = enabled && !busy) { content() }
+}
+
+/** Result of an action: green when it worked (starts with ✅), red when it failed (❌), neutral otherwise. */
+@Composable
+fun Status(text: String) {
+    if (text.isEmpty()) return
+    Text(
+        text, Modifier.padding(vertical = 6.dp), style = MaterialTheme.typography.bodySmall,
+        color = when {
+            text.startsWith("✅") -> MaterialTheme.colorScheme.primary
+            text.startsWith("❌") -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+    )
+}
+
+/** Asks before something that cannot be undone. */
+@Composable
+fun Confirm(title: String, text: String, action: String, dismiss: () -> Unit, confirm: () -> Unit) = AlertDialog(
+    onDismissRequest = dismiss,
+    title = { Text(title) }, text = { Text(text) },
+    confirmButton = { TextButton({ confirm(); dismiss() }) { Text(action, color = MaterialTheme.colorScheme.error) } },
+    dismissButton = { TextButton(dismiss) { Text("Cancelar") } },
+)
+
+/** Tabs at the top of a long screen, so each part is one tap away instead of a long scroll. */
+@Composable
+fun Tabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    ScrollableTabRow(selected, edgePadding = 0.dp, containerColor = MaterialTheme.colorScheme.background, modifier = Modifier.padding(bottom = 4.dp)) {
+        tabs.forEachIndexed { i, t -> Tab(selected == i, { onSelect(i) }, text = { Text(t) }) }
+    }
+}

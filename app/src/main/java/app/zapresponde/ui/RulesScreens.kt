@@ -1,5 +1,9 @@
 package app.zapresponde.ui
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -115,6 +119,7 @@ fun RuleEdit(id: String, done: () -> Unit) {
     if (idx < 0) return
     val r = rules[idx]
     fun set(f: Rule.() -> Rule) = Store.updateRules(rules.map { if (it.id == id) it.f() else it })
+    var askDelete by remember { mutableStateOf(false) }
 
     Panel {
         Field("Nome da regra", r.name) { set { copy(name = it) } }
@@ -183,10 +188,13 @@ fun RuleEdit(id: String, done: () -> Unit) {
             Icon(Icons.Default.KeyboardArrowDown, null); Text("Descer")
         }
         Spacer(Modifier.weight(1f))
-        TextButton({ Store.updateRules(rules.filter { it.id != id }); done() }) {
+        TextButton({ askDelete = true }) {
             Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
             Text("Apagar", color = MaterialTheme.colorScheme.error)
         }
+    }
+    if (askDelete) Confirm("Apagar a regra \"${r.name}\"?", "Ela deixa de responder na hora. Não dá para desfazer.", "Apagar", { askDelete = false }) {
+        Store.updateRules(rules.filter { it.id != id }); done()
     }
     if (r.enabled) RuleTestPanel(only = id)
 }

@@ -102,8 +102,9 @@ object Store {
             traceDirty = true
         }
         traceSaver.schedule({
-            val text = synchronized(this) { traceDirty = false; json.encodeToString(traceLog) }
-            val tmp = File(dir, "trace.json.tmp"); tmp.writeText(text); tmp.renameTo(File(dir, "trace.json"))
+            // Only the reference is taken under the lock; encoding 3000 lines there made replies wait for it.
+            val snapshot = synchronized(this) { traceDirty = false; traceLog }
+            write("trace.json", json.encodeToString(snapshot))
         }, 5, java.util.concurrent.TimeUnit.SECONDS)
     }
 
@@ -117,14 +118,21 @@ object Store {
     /** Files are written on one background thread, in order, so a reply or the screen never waits for the disk. */
     private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
 
+    /**
+     * Config, rules, history, events and the rest are immutable values (each change makes a new one), so they are
+     * turned into JSON on the writer thread too: doing it on the caller encoded hundreds of KB on the screen thread for
+     * every message. [state] is mutable and is encoded right away, under the lock, by [saveState].
+     */
     private inline fun <reified T> save(name: String, value: T) {
-        val text = json.encodeToString(value)
-        writer.execute {
-            val tmp = File(dir, "$name.tmp")
-            tmp.writeText(text)
-            tmp.renameTo(File(dir, name))
-        }
+        val ser = kotlinx.serialization.serializer<T>()
+        writer.execute { write(name, json.encodeToString(ser, value)) }
     }
+
+    private fun write(name: String, text: String) = runCatching {
+        val tmp = File(dir, "$name.tmp")
+        tmp.writeText(text)
+        tmp.renameTo(File(dir, name))
+    }.onFailure { android.util.Log.w("ZapResponde", "gravar $name", it) }
 
     /** Settings and rules before the last change the AI applied, so "Desfazer" can bring them back (also after a restart). */
     @Serializable
@@ -174,7 +182,7 @@ object Store {
     fun updateSheet(s: SheetCache) { sheet = s; save("sheet.json", s) }
 
     @Synchronized
-    fun saveState() = save("state.json", state)
+    fun saveState() { val text = json.encodeToString(State.serializer(), state); writer.execute { write("state.json", text) } }
 
     fun allRules() = rules + if (config.sheetOn && config.sheetRulesOn) sheet.rules else emptyList()
 

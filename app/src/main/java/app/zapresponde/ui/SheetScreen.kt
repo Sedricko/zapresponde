@@ -1,5 +1,6 @@
 package app.zapresponde.ui
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,22 +75,29 @@ fun SheetScreen() {
         if (ok) Hint("${s.rules.size} respostas · ${maxOf(0, s.consulta.size - 1)} linhas de consulta")
         val box = Store.outbox
         if (box.historico.isNotEmpty() || box.pedidos.isNotEmpty()) Hint("Aguardando envio: ${box.historico.size} no histórico, ${box.pedidos.size} pedidos")
-        FilledTonalButton({ Sheets.schedule(ctx); Sheets.syncNow(ctx) }, Modifier.padding(bottom = 8.dp), enabled = c.sheetOn) {
-            Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Sincronizar agora")
+        // The sync runs in the background; the spinner stays until the sheet's time changes (or 60 s pass).
+        var syncFrom by remember { mutableStateOf(0L) }
+        val syncing = syncFrom > 0 && Store.sheet.syncedAt <= syncFrom && System.currentTimeMillis() - syncFrom < 60_000
+        LaunchedEffect(syncFrom) { if (syncFrom > 0) { kotlinx.coroutines.delay(60_000); syncFrom = 0 } }
+        BusyButton("Sincronizar agora", syncing, Modifier.padding(bottom = 8.dp), enabled = c.sheetOn) {
+            syncFrom = System.currentTimeMillis(); Sheets.schedule(ctx); Sheets.syncNow(ctx)
         }
     }
     val scope = rememberCoroutineScope()
     var testMsg by remember { mutableStateOf("") }
+    var testing by remember { mutableStateOf(false) }
     fun test() {
-        testMsg = "Testando conexão..."
+        if (testing) return
+        testing = true; testMsg = "Testando conexão..."
         scope.launch {
             testMsg = withContext(Dispatchers.IO) {
                 runCatching {
                     val (resp, cons) = Sheets.read(Store.config)
-                    "Conectado! ${Engine.rulesFromSheet(resp).size} respostas e ${maxOf(0, cons.size - 1)} linhas de consulta."
-                }.getOrElse { "Não conectou: ${it.message}" }
+                    "✅ Conectado! ${Engine.rulesFromSheet(resp).size} respostas e ${maxOf(0, cons.size - 1)} linhas de consulta."
+                }.getOrElse { "❌ Não conectou: ${it.message}" }
             }
-            if (testMsg.startsWith("Conectado")) Sheets.syncNow(ctx)
+            testing = false
+            if (testMsg.startsWith("✅")) Sheets.syncNow(ctx)
         }
     }
     Panel("Conexão") {
@@ -98,21 +106,18 @@ fun SheetScreen() {
             GmsBarcodeScanning.getClient(ctx, opts).startScan()
                 .addOnSuccessListener { b ->
                     val p = Engine.parseConnectQr(b.rawValue.orEmpty())
-                    if (p == null) testMsg = "Esse QR code não é do ZapResponde."
+                    if (p == null) testMsg = "❌ Esse QR code não é do ZapResponde."
                     else {
                         cfg { copy(sheetUrl = p.first, sheetKey = p.second, sheetOn = true) }
                         Sheets.schedule(ctx); test()
                     }
                 }
-                .addOnFailureListener { testMsg = "Não abriu o leitor: ${it.message}" }
+                .addOnFailureListener { testMsg = "❌ Não abriu o leitor: ${it.message}" }
         }, Modifier.fillMaxWidth().padding(top = 8.dp)) {
             Icon(Icons.Default.Search, null); Spacer(Modifier.width(6.dp)); Text("Ler QR code da planilha")
         }
-        OutlinedButton({ test() }, Modifier.fillMaxWidth(), enabled = c.sheetUrl.isNotBlank()) { Text("Testar conexão") }
-        if (testMsg.isNotEmpty()) Text(
-            testMsg, Modifier.padding(vertical = 8.dp),
-            color = if (testMsg.startsWith("Não") || testMsg.startsWith("Esse")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        )
+        BusyButton("Testar conexão", testing, enabled = c.sheetUrl.isNotBlank(), outlined = true) { test() }
+        Status(testMsg)
         NumberField("Sincronizar a cada (mín. 15)", c.sheetSyncMin, "min") {
             cfg { copy(sheetSyncMin = it.coerceAtLeast(15)) }; Sheets.schedule(ctx)
         }

@@ -92,7 +92,10 @@ fun MoreTab(open: (String) -> Unit) {
     fun on(b: Boolean) = if (b) "ligado" else "desligado"
     // Every freight feature works only with "Respostas de frete" on; say so instead of failing silently.
     val needsFrete = if (c.freteOn) "" else " · precisa de Respostas de frete ligado"
-    Panel("Fretes") {
+    // One tab per context of use: the long list became four short pages.
+    var tab by rememberSaveable { mutableStateOf(0) }
+    Tabs(listOf("Fretes", "Respostas", "Controle", "Ferramentas"), tab) { tab = it }
+    if (tab == 0) Panel("Fretes") {
         FeatureRow(Icons.Default.Search, "Respostas de frete", "Anúncio do FreteBras ou link: manda a carga da planilha", c.freteOn, { on -> cfg { copy(freteOn = on) } }) { open("frete") }
         Divider()
         FeatureRow(Icons.Default.Edit, "Pedido escrito de qualquer jeito", "\"Goiânia para Anápolis\", \"tem carga pra Brasília?\"$needsFrete", c.freteLivreOn, { on -> cfg { copy(freteLivreOn = on) } }) { open("frete") }
@@ -105,19 +108,19 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.AutoMirrored.Filled.List, "Leads e alerta de carga", "Aba Leads ${on(c.leadsOn)} · alerta ${on(c.alertOn)}", null) { open("frete") }
     }
-    Panel("Respostas") {
+    if (tab == 1) Panel("Respostas automáticas") {
         FeatureRow(Icons.Default.Face, "Boas-vindas", "Mensagem no primeiro contato", c.welcomeOn, { on -> cfg { copy(welcomeOn = on) } }) { open("welcome") }
         Divider()
         FeatureRow(Icons.Default.ShoppingCart, "Pedido pela conversa", "Faz perguntas e grava na aba Pedidos", c.formOn, { on -> cfg { copy(formOn = on) } }) { open("form") }
         Divider()
         FeatureRow(Icons.Default.Email, "Cabeçalho e rodapé", "Texto fixo antes e depois das respostas", c.headerFooterOn, { on -> cfg { copy(headerFooterOn = on) } }) { open("header") }
     }
-    Panel("Quem e quando") {
+    if (tab == 2) Panel("Quem e quando") {
         FeatureRow(Icons.Default.AccountCircle, "Contatos", "Vale para o app todo: " + AUDIENCE[c.contactsMode].orEmpty() + if (c.groupsOn) " · grupos sim" else " · grupos não", c.contactsOn, { on -> cfg { copy(contactsOn = on) } }) { open("contacts") }
         Divider()
         FeatureRow(Icons.Default.DateRange, "Agenda", "Só responde em ${c.scheduleHours}", c.scheduleOn, { on -> cfg { copy(scheduleOn = on) } }) { open("schedule") }
     }
-    Panel("Segurança") {
+    if (tab == 2) Panel("Segurança") {
         FeatureRow(Icons.Default.CheckCircle, "Aprovar antes de enviar", "Você confirma cada resposta pela notificação", c.approvalOn, { on -> cfg { copy(approvalOn = on) } }) { open("approval") }
         Divider()
         FeatureRow(Icons.Default.Person, "Pausa quando você assume", "Para por ${c.takeoverMin} min quando você escreve, toca na notificação ou lê o que o app não respondeu", c.takeoverOn, { on -> cfg { copy(takeoverOn = on) } }) { open("takeover") }
@@ -126,7 +129,7 @@ fun MoreTab(open: (String) -> Unit) {
         Divider()
         FeatureRow(Icons.Default.Warning, "Proteção contra loop", "Pausa se outro robô ficar respondendo", c.loopGuardOn, { on -> cfg { copy(loopGuardOn = on) } }) { open("loop") }
     }
-    Panel("Ferramentas") {
+    if (tab == 3) Panel("Ferramentas") {
         FeatureRow(Icons.Default.PlayArrow, "Testar respostas", "Simule uma mensagem sem enviar nada", null) { open("test") }
         Divider()
         FeatureRow(Icons.Default.Info, "Diagnóstico", "Por que respondeu ou não · IA ${on(c.aiDiagOn)}", null) { open("help") }
@@ -420,62 +423,71 @@ internal fun ContactPicker(pad: PaddingValues, done: () -> Unit) {
 @Composable
 fun BackupScreen() {
     val ctx = LocalContext.current
-    var msg by remember { mutableStateOf("") }
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) msg = runCatching {
-            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Store.exportBackup().toByteArray()) }
-            "Backup salvo."
-        }.getOrElse { "Não consegui salvar: ${it.message}" }
-    }
-    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) msg = runCatching {
-            Store.importBackup(ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() })
-            Sheets.schedule(ctx)
-            "Backup restaurado: configurações e ${Store.rules.size} regras."
-        }.getOrElse { it.message ?: "Não consegui ler o arquivo." }
-    }
-    Panel("Arquivo: Google Drive, pCloud ou celular") {
-        Hint("Ao tocar, o Android abre a lista de lugares: escolha Google Drive, pCloud (com o app instalado) ou uma pasta do celular.")
-        Button({ export.launch("zapresponde-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".json") }, Modifier.fillMaxWidth()) {
-            Text("Salvar backup")
-        }
-        OutlinedButton({ import.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, Modifier.fillMaxWidth()) {
-            Text("Restaurar de um arquivo")
-        }
-        if (msg.isNotEmpty()) Hint(msg)
-    }
     val c = Store.config
     val scope = rememberCoroutineScope()
+    var msg by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf("") } // which button is running: "", "salvar", "restaurar"
+    var ask by remember { mutableStateOf("") }     // which restore waits for confirmation: "", "arquivo", "planilha"
+    // Restoring replaces settings and rules: a copy of the current ones is kept, so "Desfazer" can bring them back.
+    fun restore(read: () -> String, from: String) {
+        working = "restaurar"; msg = "Restaurando..."
+        scope.launch {
+            msg = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = read()
+                    Store.saveUndo(); Store.importBackup(text, "backup ($from)")
+                    "✅ Backup restaurado ($from): configurações e ${Store.rules.size} regras. Dá para desfazer abaixo."
+                }.getOrElse { "❌ " + (it.message ?: "Não consegui restaurar.") }
+            }
+            Sheets.schedule(ctx); working = ""
+        }
+    }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) msg = runCatching {
+            (ctx.contentResolver.openOutputStream(uri) ?: error("o local escolhido não aceitou o arquivo")).use { it.write(Store.exportBackup().toByteArray()) }
+            Store.trace("APP", "Backup salvo em arquivo"); "✅ Backup salvo."
+        }.getOrElse { "❌ Não consegui salvar: ${it.message}" }
+    }
+    val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) restore({ (ctx.contentResolver.openInputStream(uri) ?: error("não consegui abrir o arquivo")).use { it.readBytes().decodeToString() } }, "arquivo")
+    }
+    Hint("O backup leva todas as configurações (inclusive o link e a chave da planilha) e as regras do app; a chave do Gemini e o histórico ficam de fora.")
+    Panel("Arquivo: Google Drive, pCloud ou celular") {
+        Hint("Ao tocar, o Android abre a lista de lugares: escolha Google Drive, pCloud (com o app instalado) ou uma pasta do celular.")
+        BusyButton("Salvar backup", false, enabled = working.isEmpty()) { export.launch("zapresponde-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".json") }
+        BusyButton("Restaurar de um arquivo", working == "restaurar", enabled = working.isEmpty(), outlined = true) { ask = "arquivo" }
+    }
     Panel("Online, na planilha do Google") {
         SwitchRow("Backup diário na planilha", c.backupAutoOn, "Uma vez por dia, na aba Backup da planilha conectada") { cfg { copy(backupAutoOn = it) } }
-        OutlinedButton({
-            msg = "Salvando o backup na planilha..."
+        BusyButton("Salvar backup na planilha agora", working == "salvar", enabled = c.sheetUrl.isNotBlank() && working.isEmpty(), outlined = true) {
+            working = "salvar"; msg = "Salvando o backup na planilha..."
             scope.launch {
                 msg = withContext(Dispatchers.IO) {
                     runCatching {
                         val date = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.US).format(Date())
                         Sheets.append(Store.config, "Backup", listOf("Data", "Backup"), listOf(listOf(date, Store.exportBackup())))
-                        "Backup salvo agora na aba Backup da planilha."
-                    }.getOrElse { "Não consegui salvar na planilha: ${it.message}" }
+                        "✅ Backup salvo agora na aba Backup da planilha."
+                    }.getOrElse { "❌ Não consegui salvar na planilha: ${it.message}" }
                 }
+                working = ""
             }
-        }, Modifier.fillMaxWidth(), enabled = c.sheetUrl.isNotBlank()) { Text("Salvar backup na planilha agora") }
-        OutlinedButton({
-            msg = "Buscando o backup na planilha..."
-            scope.launch {
-                msg = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val text = Sheets.readBackup(Store.config) ?: error("A planilha ainda não tem backup.")
-                        Store.importBackup(text)
-                        "Backup da planilha restaurado: configurações e ${Store.rules.size} regras."
-                    }.getOrElse { it.message ?: "Não consegui restaurar." }
-                }
-                Sheets.schedule(ctx)
-            }
-        }, Modifier.fillMaxWidth(), enabled = c.sheetUrl.isNotBlank()) { Text("Restaurar o backup da planilha") }
+        }
+        BusyButton("Restaurar o backup da planilha", working == "restaurar", enabled = c.sheetUrl.isNotBlank() && working.isEmpty(), outlined = true) { ask = "planilha" }
+        Hint("Celular novo: conecte a planilha pelo QR (aba Planilha) e toque em \"Restaurar o backup da planilha\".")
     }
-    Panel {
-        Hint("O backup leva todas as configurações (inclusive o link e a chave da planilha) e as regras do app; a chave do Gemini e o histórico ficam de fora. Restaurar substitui as configurações e regras atuais. Celular novo: conecte a planilha pelo QR e toque em \"Restaurar o backup da planilha\".")
+    Status(msg)
+    if (Store.undo.backup.isNotEmpty()) Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Ajustes e regras de antes de ${fmt(Store.undo.time)} guardados", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ Store.undoAi(); msg = "✅ Desfeito: ajustes e regras voltaram ao que eram." }) { Text("Desfazer") }
+        }
+    }
+    if (ask.isNotEmpty()) Confirm(
+        "Restaurar o backup?", "As configurações e regras atuais serão substituídas pelas do backup ($ask). Uma cópia das atuais fica guardada para desfazer.",
+        "Restaurar", { ask = "" },
+    ) {
+        if (ask == "arquivo") import.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+        else restore({ Sheets.readBackup(Store.config) ?: error("A planilha ainda não tem backup.") }, "planilha")
     }
 }
 
